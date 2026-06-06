@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "football-tracker"
+version = "0.1.0"
+description = "YOLO26 + ByteTrack player tracking and tactical analysis for football matches"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = { text = "MIT" }
+authors = [
+    { name = "AGH AiPO Team" },
+]
+dependencies = [
+    # Detection + tracking
+    "ultralytics>=8.3.0",          # ships YOLO26 weights via `YOLO('yolo26n.pt')`
+    "supervision>=0.25.0",         # ByteTrack wrapper, annotators
+    "lap>=0.5.12",                 # Hungarian assignment (ByteTrack/BoT-SORT)
+    # CV / numerics
+    "opencv-python>=4.10",
+    "numpy>=1.26,<3",
+    "scipy>=1.13",
+    # Data
+    "pandas>=2.2",
+    "pyyaml>=6.0",
+    # Visualization
+    "matplotlib>=3.9",
+    "plotly>=5.24",
+    # Dataset tooling
+    "SoccerNet>=0.1.56",           # official downloader (password-gated splits)
+    "roboflow>=1.1.50",            # Roboflow universe downloader
+    "yt-dlp>=2025.1.15",           # YouTube clip ingest
+    # CLI / output
+    "rich>=13.9",
+]
+
+[project.optional-dependencies]
+gpu = [
+    # Friend's RTX box installs torch with CUDA wheels separately:
+    #   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+    # ultralytics will pick up the CUDA torch automatically.
+    "onnx>=1.17",
+    "onnxruntime-gpu>=1.20",
+]
+dev = [
+    "ruff>=0.7",
+    "pytest>=8.3",
+    "ipython>=8.30",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"football_tracker" = ["assets/*.png", "assets/*.json"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "W"]
+ignore = ["E501"]

@@ -1,0 +1,41 @@
+# Training hyperparameters consumed by `aipo train detector`.
+# Anything here is forwarded to `ultralytics.YOLO.train()`.
+
+# Pretrained checkpoint to start from. YOLO26 variants: yolo26n, yolo26s, yolo26m, yolo26l, yolo26x.
+# Start small (n/s) for fast iteration, scale up once pipeline works.
+model: yolo26m.pt
+
+# Path to dataset YAML (relative to repo root). Produced by `aipo download merge`.
+# Alternatives if you trained on only one source: configs/soccernet.yaml or configs/roboflow.yaml.
+data: configs/combined.yaml
+
+# Training
+epochs: 80
+imgsz: 1280            # high-res helps with small/distant players
+batch: 16              # tune for RTX VRAM
+device: 0              # GPU index
+workers: 8
+
+# Optimizer (YOLO26 defaults to MuSGD; left implicit)
+lr0: 0.001
+lrf: 0.01
+momentum: 0.937
+weight_decay: 0.0005
+warmup_epochs: 3.0
+
+# Augmentation — soccer broadcast footage benefits from heavier mosaic + scale jitter
+mosaic: 1.0
+mixup: 0.1
+scale: 0.5
+fliplr: 0.5
+hsv_h: 0.015
+hsv_s: 0.7
+hsv_v: 0.4
+
+# Logging
+project: runs/detect
+name: yolo26m_soccernet
+patience: 25
+save_period: 10
+exist_ok: false
+plots: true

@@ -1,0 +1,7 @@
+# Canonical class IDs used across the project.
+# Both Roboflow and SoccerNet downloaders remap their labels to this scheme.
+names:
+  0: player
+  1: goalkeeper
+  2: referee
+  3: ball
