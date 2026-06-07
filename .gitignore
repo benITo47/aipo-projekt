@@ -1,3 +1,8 @@
+# Claude Code / editor config
+CLAUDE.md
+.python-version
+configs/homography.json
+
 # Python
 __pycache__/
 *.py[cod]

@@ -1,0 +1,16 @@
+names:
+  0: player
+  1: goalkeeper
+  2: referee
+  3: ball
+nc: 4
+roboflow:
+  license: CC BY 4.0
+  project: football-players-detection-3zvbc
+  url: https://universe.roboflow.com/roboflow-jvuqo/football-players-detection-3zvbc/dataset/12
+  version: 12
+  workspace: roboflow-jvuqo
+test: test/images
+train: train/images
+val: valid/images
+path: /home/maciekgangus/Projects/AiPO/aipo-projekt/data/raw/roboflow

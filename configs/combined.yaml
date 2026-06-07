@@ -1,0 +1,8 @@
+path: /home/maciekgangus/Projects/AiPO/aipo-projekt/data/processed/combined
+train: images/train
+val: images/val
+names:
+  0: player
+  1: goalkeeper
+  2: referee
+  3: ball

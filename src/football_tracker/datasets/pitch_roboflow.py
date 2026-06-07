@@ -49,7 +49,7 @@ def download(
 
     rf = Roboflow(api_key=api_key)
     proj = rf.workspace(workspace).project(project)
-    ds = proj.version(version).download("yolov8-pose", location=str(out_dir))
+    ds = proj.version(version).download("yolo26", location=str(out_dir), overwrite=True)
 
     return _patch_data_yaml(Path(ds.location))
 
