@@ -48,7 +48,7 @@ def download(
 
     rf = Roboflow(api_key=api_key)
     proj = rf.workspace(workspace).project(project)
-    ds = proj.version(version).download("yolov8", location=str(out_dir))
+    ds = proj.version(version).download("yolov8", location=str(out_dir), overwrite=True)
 
     _remap_classes(Path(ds.location))
     console.log("[green]Roboflow download complete[/]")
