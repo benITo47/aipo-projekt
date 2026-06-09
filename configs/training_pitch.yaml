@@ -1,21 +1,21 @@
 # Pitch keypoint detector — YOLO26-pose, nano variant.
 # Small model, single bbox class ("pitch"), 32 keypoints.
 
-model: yolo26n-pose.pt    # n is plenty; pitch landmarks are big and structured
+model: models/checkpoints/pitch.pt    # resume fine-tuning from last checkpoint
 data: configs/pitch.yaml
 task: pose
 
-epochs: 60
+epochs: 200
 imgsz: 1280
 batch: 16
 device: 0
 workers: 8
 
-lr0: 0.001
+lr0: 0.0002          # niższy LR przy dotrenowywaniu
 lrf: 0.01
 momentum: 0.937
 weight_decay: 0.0005
-warmup_epochs: 3.0
+warmup_epochs: 0.0   # brak warmup — kontynuujemy trening
 
 # Augmentation — pitch lines are sensitive to perspective jitter; keep mild
 mosaic: 0.5
@@ -28,7 +28,7 @@ hsv_v: 0.3
 
 project: runs/pose
 name: yolo26n_pitch
-patience: 15
+patience: 30
 save_period: 10
-exist_ok: false
+exist_ok: true
 plots: true
