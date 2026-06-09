@@ -145,7 +145,10 @@ def run(
                 break
 
             # ----- pitch keypoints → homography (if pitch model present) -----
+            # NOTE: keypoint drawing happens AFTER detection so the drawn circles
+            # are not fed back into the detector as false positives.
             homo_trusted = False
+            pres = None
             if dyn_estimator is not None and pitch_model is not None:
                 pres = pitch_model.predict(frame, verbose=False, imgsz=1280)[0]
                 dyn = dyn_estimator.update(pres)
@@ -155,20 +158,12 @@ def run(
                     f"dyn ({dyn.n_visible}/32 kpts)"
                     if homo_trusted else f"dyn-fallback ({dyn.n_visible})"
                 )
-                # draw pitch keypoints on frame
-                if pres.keypoints is not None and len(pres.keypoints.data) > 0:
-                    kp_data = pres.keypoints.data.cpu().numpy()[0]
-                    for kp_i, (kx, ky, kc) in enumerate(kp_data):
-                        if kc > 0.5:
-                            cv2.circle(frame, (int(kx), int(ky)), 6, (0, 255, 255), -1)
-                            cv2.putText(frame, str(kp_i), (int(kx) + 5, int(ky) - 4),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 255), 1)
             else:
                 homo = static_h
                 homo_status = "static"
                 homo_trusted = homo is not None
 
-            # ----- detection -----
+            # ----- detection (on unmodified frame) -----
             yres = detector.predict(
                 frame, verbose=False, imgsz=1280, classes=predict_classes
             )[0]
@@ -214,6 +209,15 @@ def run(
                 frame, f"H: {homo_status}", (8, 24),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2
             )
+
+            # ----- pitch keypoint overlay (drawn after detection to avoid false positives) -----
+            if pres is not None and pres.keypoints is not None and len(pres.keypoints.data) > 0:
+                kp_data = pres.keypoints.data.cpu().numpy()[0]
+                for kp_i, (kx, ky, kc) in enumerate(kp_data):
+                    if kc > 0.5:
+                        cv2.circle(frame, (int(kx), int(ky)), 6, (0, 255, 255), -1)
+                        cv2.putText(frame, str(kp_i), (int(kx) + 5, int(ky) - 4),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 255), 1)
 
             # ----- minimap composition -----
             if minimap is not None:
