@@ -66,6 +66,29 @@ def cmd_merge(args: argparse.Namespace) -> None:
     merge.run(soccernet=sn, roboflow=rf, out_dir=args.out, use_symlinks=not args.copy)
 
 
+def cmd_soccernet_pitch(args: argparse.Namespace) -> None:
+    """Download + convert SoccerNet calibration-2023 → YOLO-pose pitch labels."""
+    from football_tracker.datasets import soccernet_calibration
+
+    zip_path = Path(args.zip) if args.zip else None
+    sn_dir = Path(args.sn_dir)
+    out_dir = Path(args.out)
+
+    if zip_path and zip_path.exists():
+        soccernet_calibration.unzip_and_convert(
+            zip_path, sn_dir, out_dir, split=args.split, max_samples=args.max_samples
+        )
+    elif (sn_dir / args.split).exists():
+        soccernet_calibration.convert(
+            sn_dir, out_dir, split=args.split, max_samples=args.max_samples
+        )
+    else:
+        raise SystemExit(
+            f"Neither zip ({zip_path}) nor extracted dir ({sn_dir}/{args.split}) found.\n"
+            "Download first: python dataset.py soccernet --split calibration-2023"
+        )
+
+
 def cmd_all(args: argparse.Namespace) -> None:
     """Quick path: Roboflow players + Roboflow pitch + merge. No NDA needed."""
     api_key = args.api_key or os.environ.get("ROBOFLOW_API_KEY")
@@ -134,6 +157,14 @@ def build_parser() -> argparse.ArgumentParser:
     yt.add_argument("--out", type=Path, default=Path("data/raw/youtube"))
     yt.add_argument("--resolution", default="1080")
     yt.set_defaults(func=cmd_youtube)
+
+    snp = sub.add_parser("soccernet-pitch", help="Convert SoccerNet calibration-2023 → YOLO-pose pitch labels.")
+    snp.add_argument("--zip", default=None, help="Path to train.zip (auto-unzips if given).")
+    snp.add_argument("--sn-dir", default="data/soccernet/calibration-2023", help="Extracted SoccerNet dir.")
+    snp.add_argument("--split", default="train", choices=["train", "valid", "test"])
+    snp.add_argument("--out", type=Path, default=Path("data/raw/soccernet_pitch"))
+    snp.add_argument("--max-samples", type=int, default=None, help="Limit for testing.")
+    snp.set_defaults(func=cmd_soccernet_pitch)
 
     mg = sub.add_parser("merge", help="Merge player datasets into configs/combined.yaml.")
     mg.add_argument("--soccernet", type=Path, default=None)
