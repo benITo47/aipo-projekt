@@ -145,17 +145,28 @@ def run(
                 break
 
             # ----- pitch keypoints → homography (if pitch model present) -----
+            homo_trusted = False
             if dyn_estimator is not None and pitch_model is not None:
                 pres = pitch_model.predict(frame, verbose=False, imgsz=1280)[0]
                 dyn = dyn_estimator.update(pres)
                 homo = dyn.homography
+                homo_trusted = not dyn.used_fallback
                 homo_status = (
                     f"dyn ({dyn.n_visible}/32 kpts)"
-                    if not dyn.used_fallback else f"dyn-fallback ({dyn.n_visible})"
+                    if homo_trusted else f"dyn-fallback ({dyn.n_visible})"
                 )
+                # draw pitch keypoints on frame
+                if pres.keypoints is not None and len(pres.keypoints.data) > 0:
+                    kp_data = pres.keypoints.data.cpu().numpy()[0]
+                    for kp_i, (kx, ky, kc) in enumerate(kp_data):
+                        if kc > 0.5:
+                            cv2.circle(frame, (int(kx), int(ky)), 6, (0, 255, 255), -1)
+                            cv2.putText(frame, str(kp_i), (int(kx) + 5, int(ky) - 4),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 255), 1)
             else:
                 homo = static_h
                 homo_status = "static"
+                homo_trusted = homo is not None
 
             # ----- detection -----
             yres = detector.predict(
@@ -190,7 +201,7 @@ def run(
                     cv2.polylines(frame, [pts.reshape(-1, 1, 2)], False, colour, 2)
 
                 label = f"#{t.track_id} {CLASS_NAMES.get(t.class_id, '?')}"
-                if show_analytics and t.class_id != 3 and pitch_pts.size:
+                if show_analytics and t.class_id != 3 and pitch_pts.size and homo_trusted:
                     total_m, speed = dist.update(t.track_id, pitch)
                     label += f" | {total_m:.0f}m {speed:.1f}km/h"
                 cv2.putText(

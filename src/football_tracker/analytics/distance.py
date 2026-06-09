@@ -25,19 +25,26 @@ class DistanceTracker:
         self.alpha = ema_alpha
         self._state: dict[int, _PlayerState] = {}
 
+    # Max displacement per frame: 0.8m at 25 fps ≈ 20 m/s ≈ 72 km/h.
+    # 2× real top sprint speed; filters homography noise while not capping real play.
+    MAX_DELTA_M: float = 0.8
+
     def update(self, track_id: int, pitch_xy: np.ndarray) -> tuple[float, float]:
         """Returns (total_metres, smoothed_speed_kmh)."""
         st = self._state.setdefault(track_id, _PlayerState())
         if st.last_xy is not None:
             delta_m = float(np.linalg.norm(pitch_xy - st.last_xy))
-            # Reject unphysical jumps (>15 m between consecutive frames = tracker swap).
-            if delta_m < 15.0:
+            if delta_m < self.MAX_DELTA_M:
                 st.total_m += delta_m
                 inst_kmh = (delta_m / self.dt) * 3.6
                 st.speed_kmh_ema = (
                     self.alpha * inst_kmh + (1 - self.alpha) * st.speed_kmh_ema
                 )
-        st.last_xy = pitch_xy.copy()
+                st.last_xy = pitch_xy.copy()
+            # On rejection keep last_xy so next accepted frame compares from
+            # the last known-good position rather than the bad outlier.
+        else:
+            st.last_xy = pitch_xy.copy()
         st.history.append((float(pitch_xy[0]), float(pitch_xy[1])))
         return st.total_m, st.speed_kmh_ema
 
