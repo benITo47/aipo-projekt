@@ -25,6 +25,7 @@ from football_tracker.analytics.distance import DistanceTracker
 from football_tracker.pitch.dynamic_homography import DynamicHomographyEstimator
 from football_tracker.pitch.homography import Homography, calibrate_interactive
 from football_tracker.pitch.minimap import Minimap, _class_colour
+from football_tracker.pitch.preprocess import enhance_pitch_lines
 from football_tracker.tracking.bytetrack import ByteTracker
 from football_tracker.tracking.trail import TrailBuffer
 
@@ -150,7 +151,7 @@ def run(
             homo_trusted = False
             pres = None
             if dyn_estimator is not None and pitch_model is not None:
-                pres = pitch_model.predict(frame, verbose=False, imgsz=960)[0]
+                pres = pitch_model.predict(enhance_pitch_lines(frame), verbose=False, imgsz=960)[0]
                 dyn = dyn_estimator.update(pres)
                 homo = dyn.homography
                 homo_trusted = not dyn.used_fallback
