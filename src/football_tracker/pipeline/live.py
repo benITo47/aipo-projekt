@@ -152,7 +152,7 @@ def run(
             pres = None
             if dyn_estimator is not None and pitch_model is not None:
                 pres = pitch_model.predict(enhance_pitch_lines(frame), verbose=False, imgsz=960)[0]
-                dyn = dyn_estimator.update(pres)
+                dyn = dyn_estimator.update(pres, image_shape=frame.shape[:2])
                 homo = dyn.homography
                 homo_trusted = not dyn.used_fallback
                 homo_status = (
@@ -175,18 +175,28 @@ def run(
                     t.class_id = _COCO_TO_CANONICAL.get(t.class_id, t.class_id)
 
             # ----- foot points → pitch metres -----
+            _PITCH_W, _PITCH_H, _MARGIN = 105.0, 68.0, 3.0
             if tracks and homo is not None:
                 foot_pts = np.array(
                     [[(t.xyxy[0] + t.xyxy[2]) / 2, t.xyxy[3]] for t in tracks],
                     dtype=np.float32,
                 )
                 pitch_pts = homo.project(foot_pts)
+                # Only pass through projections that land within the pitch bounds.
+                # Keypoints from only one side of the pitch produce a locally-correct
+                # but globally-extrapolating homography; out-of-bounds projections
+                # must be suppressed before they corrupt analytics and the minimap.
+                in_pitch = (
+                    (pitch_pts[:, 0] >= -_MARGIN) & (pitch_pts[:, 0] <= _PITCH_W + _MARGIN) &
+                    (pitch_pts[:, 1] >= -_MARGIN) & (pitch_pts[:, 1] <= _PITCH_H + _MARGIN)
+                )
             else:
                 foot_pts = np.empty((0, 2), dtype=np.float32)
                 pitch_pts = np.empty((0, 2), dtype=np.float32)
+                in_pitch = np.zeros(0, dtype=bool)
 
             # ----- draw boxes + IDs + trails -----
-            for t, foot, pitch in zip(tracks, foot_pts, pitch_pts, strict=False):
+            for i, (t, foot, pitch) in enumerate(zip(tracks, foot_pts, pitch_pts, strict=False)):
                 colour = _class_colour(t.class_id)
                 x1, y1, x2, y2 = t.xyxy.astype(int)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), colour, 2)
@@ -197,7 +207,8 @@ def run(
                     cv2.polylines(frame, [pts.reshape(-1, 1, 2)], False, colour, 2)
 
                 label = f"#{t.track_id} {CLASS_NAMES.get(t.class_id, '?')}"
-                if show_analytics and t.class_id != 3 and pitch_pts.size and homo_trusted:
+                on_pitch = bool(in_pitch[i]) if in_pitch.size > 0 else False
+                if show_analytics and t.class_id != 3 and on_pitch and homo_trusted:
                     total_m, speed = dist.update(t.track_id, pitch)
                     label += f" | {total_m:.0f}m {speed:.1f}km/h"
                 cv2.putText(
@@ -223,7 +234,9 @@ def run(
             # ----- minimap composition -----
             if minimap is not None:
                 class_ids = np.array([t.class_id for t in tracks], dtype=np.int32)
-                mm = minimap.render(pitch_pts, class_ids)
+                mm_pts = pitch_pts[in_pitch] if in_pitch.any() else np.empty((0, 2), np.float32)
+                mm_cls = class_ids[in_pitch] if in_pitch.any() else np.empty(0, np.int32)
+                mm = minimap.render(mm_pts, mm_cls)
                 composed = _stack_side_by_side(frame, mm)
             else:
                 composed = frame

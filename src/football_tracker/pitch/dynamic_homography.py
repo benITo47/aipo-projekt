@@ -39,8 +39,16 @@ class DynamicHomographyEstimator:
         self.scheme = scheme or load_scheme()
         self._last_good: Homography | None = None
 
-    def update(self, pose_result) -> DynamicHomographyResult:
-        """`pose_result` is one ultralytics pose Results object."""
+    def update(
+        self,
+        pose_result,
+        image_shape: tuple[int, int] | None = None,
+    ) -> DynamicHomographyResult:
+        """`pose_result` is one ultralytics pose Results object.
+        `image_shape` is (height, width) of the source frame; when provided,
+        image corners are projected through H to catch one-sided-keypoint
+        homographies that extrapolate wildly outside the pitch.
+        """
         kpts = self._pick_best_pitch_detection(pose_result)
         if kpts is None:
             return DynamicHomographyResult(self._last_good, 0, True)
@@ -59,6 +67,25 @@ class DynamicHomographyEstimator:
         H, inlier_mask = cv2.findHomography(image_pts, world_pts, cv2.RANSAC, 5.0)
         if H is None or inlier_mask is None or int(inlier_mask.sum()) < MIN_KEYPOINTS:
             return DynamicHomographyResult(self._last_good, n_visible, True)
+
+        # Guard: project the 4 image corners through H and reject if more than one
+        # lands far outside the pitch. This catches one-sided keypoints (e.g. only
+        # the left goal is visible) which produce a locally-correct but globally-
+        # wrong homography that extrapolates wildly to the rest of the image.
+        if image_shape is not None:
+            h_img, w_img = image_shape
+            _corners_img = np.array(
+                [[0, 0], [w_img, 0], [w_img, h_img], [0, h_img]], dtype=np.float32
+            ).reshape(-1, 1, 2)
+            _corners_world = cv2.perspectiveTransform(_corners_img, H).reshape(-1, 2)
+            pw, ph = self.scheme.pitch_size_m
+            _margin = 50.0
+            _n_bad = int(np.sum(
+                (_corners_world[:, 0] < -_margin) | (_corners_world[:, 0] > pw + _margin) |
+                (_corners_world[:, 1] < -_margin) | (_corners_world[:, 1] > ph + _margin)
+            ))
+            if _n_bad > 1:
+                return DynamicHomographyResult(self._last_good, n_visible, True)
 
         # Approximate image-frame "corners" by back-projecting pitch corners; only
         # used by the saved Homography for inspection.
