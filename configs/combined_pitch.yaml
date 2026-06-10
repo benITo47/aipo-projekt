@@ -1,0 +1,21 @@
+# Combined pitch keypoint dataset:
+#   SoccerNet calibration-2023: 13k+ broadcast camera frames
+#   Roboflow football-field-detection v15: 317 tactical camera frames
+# Together this covers both camera perspectives.
+
+path: .
+
+train:
+  - data/raw/soccernet_pitch/train/images
+  - data/raw/pitch/train/images
+
+val:
+  - data/raw/soccernet_pitch/valid/images
+  - data/raw/pitch/valid/images
+
+nc: 1
+names:
+  0: pitch
+
+kpt_shape: [32, 3]
+flip_idx: [1, 0, 3, 2, 4, 5, 12, 13, 10, 11, 8, 9, 6, 7, 20, 21, 18, 19, 16, 17, 14, 15, 24, 25, 22, 23, 26, 27, 28, 30, 29, 31]
