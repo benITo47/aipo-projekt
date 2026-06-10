@@ -150,7 +150,7 @@ def run(
             homo_trusted = False
             pres = None
             if dyn_estimator is not None and pitch_model is not None:
-                pres = pitch_model.predict(frame, verbose=False, imgsz=1280)[0]
+                pres = pitch_model.predict(frame, verbose=False, imgsz=960)[0]
                 dyn = dyn_estimator.update(pres)
                 homo = dyn.homography
                 homo_trusted = not dyn.used_fallback
