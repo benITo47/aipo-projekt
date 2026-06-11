@@ -30,9 +30,15 @@ def run(config_path: Path) -> Path:
         )
 
     try:
+        import torch
         from ultralytics import YOLO
     except ImportError as e:
         raise SystemExit("Install ultralytics first: pip install ultralytics") from e
+
+    # YOLO26 RLE loss uses Cholesky decomp — cusolver can fail on some drivers.
+    # Fall back to magma which is more stable on consumer GPUs.
+    if torch.cuda.is_available():
+        torch.backends.cuda.preferred_linalg_library("magma")
 
     console.log(f"[cyan]Loading[/] {model_name}")
     model = YOLO(model_name)
