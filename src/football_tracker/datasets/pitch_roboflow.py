@@ -63,8 +63,8 @@ def _patch_data_yaml(ds_root: Path) -> Path:
 
     body = yaml.safe_load(data_yaml.read_text())
     body["path"] = str(ds_root)
-    body["train"] = body.get("train", "train/images")
-    body["val"] = body.get("val", "valid/images")
+    body["train"] = "train/images"
+    body["val"] = "valid/images"
     body["names"] = {0: "pitch"}            # single bbox class — the whole pitch
     body["nc"] = 1
     body["kpt_shape"] = [scheme.num, 3]
