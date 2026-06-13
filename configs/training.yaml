@@ -11,7 +11,7 @@ data: configs/combined.yaml
 
 epochs: 120
 imgsz: 1280                # high-res helps with small/distant players
-batch: 16                  # 16 needs ~14 GB VRAM; drop to 8 if your RTX is smaller
+batch: 2                   # reduced — yolo26m at imgsz=1280 OOMs at batch=4 on 16 GB
 device: 0
 workers: 8
 

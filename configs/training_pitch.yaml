@@ -15,9 +15,9 @@ task: pose
 
 epochs: 100
 imgsz: 960
-batch: 16                  # 16 needs ~16 GB VRAM at 960; drop to 8 if smaller
+batch: 2                   # yolo26m-pose at 960 OOMs at batch=4 on 16 GB; batch=2 is safe
 device: 0
-workers: 8
+workers: 4
 
 # Explicit AdamW (mirrors training_pitch_combined.yaml after the fine-tune-collapse fix)
 optimizer: AdamW
