@@ -42,6 +42,12 @@ _COCO_TO_CANONICAL = {0: 0, 32: 3}
 _PITCH_KP_COLOUR = (180, 105, 255)
 
 
+def _faded(colour: tuple[int, int, int]) -> tuple[int, int, int]:
+    """Halve toward grey — used for untracked detections so they don't dominate the frame."""
+    grey = 128
+    return tuple(int((c + grey) / 2) for c in colour)
+
+
 def run(
     source: str,
     weights: Path,
@@ -178,24 +184,25 @@ def run(
             yres = detector.predict(
                 frame, verbose=False, imgsz=1280, classes=predict_classes, device=device
             )[0]
-            tracks = bt.update(yres)
+            tracks, untracked = bt.update(yres)
 
             if pretrained_fallback:
                 for t in tracks:
                     t.class_id = _COCO_TO_CANONICAL.get(t.class_id, t.class_id)
+                for t in untracked:
+                    t.class_id = _COCO_TO_CANONICAL.get(t.class_id, t.class_id)
 
-            # ----- foot points → pitch metres -----
+            # ----- foot points → pitch metres (only for trusted H!) -----
+            # Untrusted homographies (one-sided / stale / RANSAC-bad) would project
+            # players into wildly wrong positions on the minimap. Skip entirely.
             _PITCH_W, _PITCH_H, _MARGIN = 105.0, 68.0, 3.0
-            if tracks and homo is not None:
+            if tracks and homo is not None and homo_trusted:
                 foot_pts = np.array(
                     [[(t.xyxy[0] + t.xyxy[2]) / 2, t.xyxy[3]] for t in tracks],
                     dtype=np.float32,
                 )
                 pitch_pts = homo.project(foot_pts)
                 # Only pass through projections that land within the pitch bounds.
-                # Keypoints from only one side of the pitch produce a locally-correct
-                # but globally-extrapolating homography; out-of-bounds projections
-                # must be suppressed before they corrupt analytics and the minimap.
                 in_pitch = (
                     (pitch_pts[:, 0] >= -_MARGIN) & (pitch_pts[:, 0] <= _PITCH_W + _MARGIN) &
                     (pitch_pts[:, 1] >= -_MARGIN) & (pitch_pts[:, 1] <= _PITCH_H + _MARGIN)
@@ -205,31 +212,40 @@ def run(
                 pitch_pts = np.empty((0, 2), dtype=np.float32)
                 in_pitch = np.zeros(0, dtype=bool)
 
-            # ----- draw boxes + IDs + trails -----
-            for i, (t, foot, pitch) in enumerate(zip(tracks, foot_pts, pitch_pts, strict=False)):
+            # ----- draw untracked detections first (faint, no ID) -----
+            # These are detections the tracker couldn't confirm yet; without rendering
+            # them the user sees boxes flicker in and out as tracks confirm/decay.
+            for u in untracked:
+                colour = _class_colour(u.class_id)
+                x1, y1, x2, y2 = u.xyxy.astype(int)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), _faded(colour), 1)
+
+            # ----- draw tracked boxes + IDs + trails -----
+            for i, t in enumerate(tracks):
                 colour = _class_colour(t.class_id)
                 x1, y1, x2, y2 = t.xyxy.astype(int)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), colour, 2)
 
-                trail.update(t.track_id, (float(foot[0]), float(foot[1])))
-                pts = trail.get(t.track_id).astype(np.int32)
-                if len(pts) > 1:
-                    cv2.polylines(frame, [pts.reshape(-1, 1, 2)], False, colour, 2)
-
                 label = f"#{t.track_id} {CLASS_NAMES.get(t.class_id, '?')}"
-                on_pitch = bool(in_pitch[i]) if in_pitch.size > 0 else False
-                if show_analytics and t.class_id != 3 and on_pitch and homo_trusted:
-                    total_m, speed = dist.update(t.track_id, pitch)
-                    label += f" | {total_m:.0f}m {speed:.1f}km/h"
+                if i < len(foot_pts):
+                    foot = foot_pts[i]
+                    trail.update(t.track_id, (float(foot[0]), float(foot[1])))
+                    pts = trail.get(t.track_id).astype(np.int32)
+                    if len(pts) > 1:
+                        cv2.polylines(frame, [pts.reshape(-1, 1, 2)], False, colour, 2)
+                    on_pitch = bool(in_pitch[i]) if in_pitch.size > 0 else False
+                    if show_analytics and t.class_id != 3 and on_pitch and homo_trusted:
+                        total_m, speed = dist.update(t.track_id, pitch_pts[i])
+                        label += f" | {total_m:.0f}m {speed:.1f}km/h"
                 cv2.putText(
                     frame, label, (x1, max(0, y1 - 6)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, colour, 2
                 )
 
-            # HUD: homography status (top-left)
+            # HUD: homography status + detection stats (top-left)
             cv2.putText(
-                frame, f"H: {homo_status}", (8, 24),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2
+                frame, f"H: {homo_status}  det: {len(tracks)}+{len(untracked)} untracked",
+                (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2
             )
 
             # ----- pitch keypoint overlay (drawn after detection to avoid false positives) -----
