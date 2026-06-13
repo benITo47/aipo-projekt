@@ -9,10 +9,15 @@ from pathlib import Path
 
 from rich.console import Console
 
+from football_tracker.device import pick_device
+
 console = Console()
 
 
-def run(weights: Path, data: Path, imgsz: int = 1280) -> dict[str, float]:
+def run(
+    weights: Path, data: Path, imgsz: int = 960, device: str | None = None
+) -> dict[str, float]:
+    """imgsz defaults to 960 to match the pitch model's training resolution."""
     if not weights.exists():
         raise SystemExit(f"Pitch weights not found: {weights}")
     if not data.exists():
@@ -20,8 +25,10 @@ def run(weights: Path, data: Path, imgsz: int = 1280) -> dict[str, float]:
 
     from ultralytics import YOLO
 
+    device = pick_device(device)
+    console.log(f"[cyan]Device[/] {device}")
     model = YOLO(str(weights))
-    metrics = model.val(data=str(data), imgsz=imgsz, plots=True)
+    metrics = model.val(data=str(data), imgsz=imgsz, plots=True, device=device)
 
     out = {
         "box_map50_95": float(metrics.box.map),

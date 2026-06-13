@@ -12,7 +12,9 @@ import numpy as np
 from rich.console import Console
 from rich.table import Table
 
+from football_tracker.device import pick_device
 from football_tracker.pitch.dynamic_homography import DynamicHomographyEstimator
+from football_tracker.pitch.preprocess import enhance_pitch_lines
 
 console = Console()
 
@@ -22,12 +24,20 @@ def run(
     pitch_weights: Path,
     max_frames: int | None = None,
     stride: int = 1,
+    imgsz: int = 960,            # matches pitch model's training resolution
+    device: str | None = None,
 ) -> dict[str, float]:
+    """Process `source` through the pitch model, matching the live pipeline's
+    preprocessing (green-suppression) + imgsz so the numbers reflect what the
+    demo actually sees.
+    """
     if not Path(pitch_weights).exists():
         raise SystemExit(f"Pitch weights not found: {pitch_weights}")
 
     from ultralytics import YOLO
 
+    device = pick_device(device)
+    console.log(f"[cyan]Device[/] {device}")
     model = YOLO(str(pitch_weights))
     estimator = DynamicHomographyEstimator()
 
@@ -51,8 +61,10 @@ def run(
             frame_idx += 1
             continue
 
-        pres = model.predict(frame, verbose=False, imgsz=1280)[0]
-        result = estimator.update(pres)
+        pres = model.predict(
+            enhance_pitch_lines(frame), verbose=False, imgsz=imgsz, device=device
+        )[0]
+        result = estimator.update(pres, image_shape=frame.shape[:2])
         kpt_counts.append(result.n_visible)
 
         if result.homography is not None and not result.used_fallback:

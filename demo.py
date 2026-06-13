@@ -42,6 +42,8 @@ def main() -> int:
                    help="Write the annotated video here.")
     p.add_argument("--no-show", dest="show", action="store_false",
                    help="Run headless (useful for batch processing).")
+    p.add_argument("--device", default="auto",
+                   help="auto | cpu | mps | cuda | cuda:N | 0 | 0,1,2  (default: auto)")
     p.set_defaults(minimap=True, analytics=True, show=True)
 
     args = p.parse_args()
@@ -57,6 +59,7 @@ def main() -> int:
         homography_path=args.homography,
         output_path=args.output,
         show=args.show,
+        device=args.device,
     )
     return 0
 
