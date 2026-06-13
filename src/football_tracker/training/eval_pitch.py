@@ -7,11 +7,24 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import yaml
 from rich.console import Console
 
 from football_tracker.device import pick_device
 
 console = Console()
+
+
+def _check_dataset_present(data_yaml: Path) -> None:
+    body = yaml.safe_load(data_yaml.read_text())
+    root = Path(body.get("path", ".")).resolve()
+    val_rel = body.get("val", "")
+    val_dir = root / val_rel
+    if not val_dir.exists() or not any(val_dir.iterdir()):
+        raise SystemExit(
+            f"Pitch dataset val split is missing or empty: {val_dir}\n"
+            "Download it first: python dataset.py pitch"
+        )
 
 
 def run(
@@ -21,7 +34,11 @@ def run(
     if not weights.exists():
         raise SystemExit(f"Pitch weights not found: {weights}")
     if not data.exists():
-        raise SystemExit(f"Pitch dataset YAML not found: {data}")
+        raise SystemExit(
+            f"Pitch dataset YAML not found: {data}\n"
+            "Generate it with `python dataset.py pitch`."
+        )
+    _check_dataset_present(data)
 
     from ultralytics import YOLO
 
