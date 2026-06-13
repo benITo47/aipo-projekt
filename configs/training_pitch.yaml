@@ -1,19 +1,21 @@
-# Pitch keypoint detector — YOLO26-pose, small variant.
+# Pitch keypoint detector — YOLO26-pose, medium variant.
 # Single bbox class ("pitch") + 32 keypoints.
 #
-# v2 (post-broadcast-failure tweaks):
-#   - nano → small (n is undersized for a 32-keypoint head)
-#   - heavier augmentation to simulate broadcast camera from tactical-cam data
-#     (perspective + scale + small rotation)
-#   - imgsz: 960 stays — matches inference resolution used in the live pipeline
+# v3 (post-diagnostic on broadcast clip):
+#   - small → medium (32 keypoints need real model capacity)
+#   - epochs 60 → 100 (patience 20 still triggers early-stop)
+#   - crop_fraction stays: this is what teaches the model to handle one-sided
+#     pitch views (right-half or left-half only) as a primary case rather than
+#     a degraded edge case
+#   - exist_ok: true so re-runs don't fail
 
-model: yolo26s-pose.pt
+model: yolo26m-pose.pt
 data: configs/pitch.yaml
 task: pose
 
-epochs: 60
+epochs: 100
 imgsz: 960
-batch: 16
+batch: 16                  # 16 needs ~16 GB VRAM at 960; drop to 8 if smaller
 device: 0
 workers: 8
 
@@ -41,8 +43,8 @@ hsv_s: 0.5
 hsv_v: 0.3
 
 project: runs/pose
-name: yolo26s_pitch
-patience: 15
+name: yolo26m_pitch_v3
+patience: 20
 save_period: 10
-exist_ok: false
+exist_ok: true             # let re-runs reuse the directory without crashing
 plots: true

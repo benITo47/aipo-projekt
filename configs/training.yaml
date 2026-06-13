@@ -1,41 +1,41 @@
-# Training hyperparameters consumed by `aipo train detector`.
-# Anything here is forwarded to `ultralytics.YOLO.train()`.
+# Detector training config — consumed by `python train.py detector`.
+# Forwarded verbatim to `ultralytics.YOLO.train()`.
+#
+# v2 (post-diagnostic):
+#   - epochs 80 → 120 (patience 25 still triggers early-stop if it stalls)
+#   - explicit AdamW + lr0 5e-4 to match the pitch model's collapse-proof recipe
+#   - exist_ok: true so re-runs don't fail when the run directory exists
 
-# Pretrained checkpoint to start from. YOLO26 variants: yolo26n, yolo26s, yolo26m, yolo26l, yolo26x.
-# Start small (n/s) for fast iteration, scale up once pipeline works.
-model: yolo26m.pt
-
-# Path to dataset YAML (relative to repo root). Produced by `aipo download merge`.
-# Alternatives if you trained on only one source: configs/soccernet.yaml or configs/roboflow.yaml.
+model: yolo26m.pt          # medium variant — best speed/quality tradeoff for soccer
 data: configs/combined.yaml
 
-# Training
-epochs: 80
-imgsz: 1280            # high-res helps with small/distant players
-batch: 16              # tune for RTX VRAM
-device: 0              # GPU index
+epochs: 120
+imgsz: 1280                # high-res helps with small/distant players
+batch: 16                  # 16 needs ~14 GB VRAM; drop to 8 if your RTX is smaller
+device: 0
 workers: 8
 
-# Optimizer (YOLO26 defaults to MuSGD; left implicit)
-lr0: 0.001
+optimizer: AdamW
+lr0: 0.0005
 lrf: 0.01
 momentum: 0.937
 weight_decay: 0.0005
 warmup_epochs: 3.0
 
-# Augmentation — soccer broadcast footage benefits from heavier mosaic + scale jitter
+# Augmentation — broadcast / mixed-source data benefits from heavier jitter
 mosaic: 1.0
 mixup: 0.1
 scale: 0.5
+perspective: 0.0005        # mild — players are easier than pitch lines
+degrees: 3.0
 fliplr: 0.5
 hsv_h: 0.015
 hsv_s: 0.7
 hsv_v: 0.4
 
-# Logging
 project: runs/detect
-name: yolo26m_soccernet
-patience: 25
+name: yolo26m_v2
+patience: 30
 save_period: 10
-exist_ok: false
+exist_ok: true             # let re-runs reuse the directory without crashing
 plots: true
