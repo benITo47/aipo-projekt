@@ -14,6 +14,24 @@ from rich.console import Console
 console = Console()
 
 
+def _check_dataset(data_yaml: Path) -> None:
+    if not data_yaml.exists():
+        raise SystemExit(
+            f"Pitch dataset YAML missing: {data_yaml}\n"
+            "Run `python dataset.py pitch` first."
+        )
+    body = yaml.safe_load(data_yaml.read_text())
+    root = Path(body.get("path", ".")).resolve()
+    for split in ("train", "val"):
+        rel = body.get(split, "")
+        d = root / rel
+        if not d.exists() or not any(d.iterdir()):
+            raise SystemExit(
+                f"Pitch dataset {split} split missing or empty: {d}\n"
+                "Download the data: `python dataset.py pitch`"
+            )
+
+
 def run(config_path: Path) -> Path:
     if not config_path.exists():
         raise SystemExit(f"Pitch training config not found: {config_path}")
@@ -22,12 +40,7 @@ def run(config_path: Path) -> Path:
     model_name = cfg.pop("model", "yolo26n-pose.pt")
     data_path = Path(cfg.pop("data"))
     cfg.pop("task", None)   # passed via the model itself
-
-    if not data_path.exists():
-        raise SystemExit(
-            f"Pitch dataset YAML missing: {data_path}. "
-            "Run `aipo download pitch` first."
-        )
+    _check_dataset(data_path)
 
     try:
         import torch
