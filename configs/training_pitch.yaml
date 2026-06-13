@@ -1,33 +1,47 @@
-# Pitch keypoint detector — YOLO26-pose, nano variant.
-# Small model, single bbox class ("pitch"), 32 keypoints.
+# Pitch keypoint detector — YOLO26-pose, small variant.
+# Single bbox class ("pitch") + 32 keypoints.
+#
+# v2 (post-broadcast-failure tweaks):
+#   - nano → small (n is undersized for a 32-keypoint head)
+#   - heavier augmentation to simulate broadcast camera from tactical-cam data
+#     (perspective + scale + small rotation)
+#   - imgsz: 960 stays — matches inference resolution used in the live pipeline
 
-model: yolo26n-pose.pt    # n is plenty; pitch landmarks are big and structured
+model: yolo26s-pose.pt
 data: configs/pitch.yaml
 task: pose
 
 epochs: 60
-imgsz: 1280
+imgsz: 960
 batch: 16
 device: 0
 workers: 8
 
-lr0: 0.001
+# Explicit AdamW (mirrors training_pitch_combined.yaml after the fine-tune-collapse fix)
+optimizer: AdamW
+lr0: 0.00005
 lrf: 0.01
 momentum: 0.937
 weight_decay: 0.0005
 warmup_epochs: 3.0
 
-# Augmentation — pitch lines are sensitive to perspective jitter; keep mild
+# Augmentation — addressing the "half-pitch view" failure mode.
+# Diagnostic on a broadcast clip showed the model only ever sees keypoints from
+# one half of the pitch (the action side). Center-crop augmentation forces the
+# model to learn confident predictions on partial views.
 mosaic: 0.5
 mixup: 0.0
-scale: 0.3
-fliplr: 0.5      # uses flip_idx from configs/pitch.yaml to mirror keypoint order
+scale: 0.75        # broadcast telephoto sim
+perspective: 0.001 # lower camera angle sim
+degrees: 5.0       # canted broadcast shots
+crop_fraction: 0.7 # train on random partial views (key for one-sided pitch frames)
+fliplr: 0.5        # uses flip_idx from configs/pitch.yaml to mirror keypoint order
 hsv_h: 0.015
 hsv_s: 0.5
 hsv_v: 0.3
 
 project: runs/pose
-name: yolo26n_pitch
+name: yolo26s_pitch
 patience: 15
 save_period: 10
 exist_ok: false
