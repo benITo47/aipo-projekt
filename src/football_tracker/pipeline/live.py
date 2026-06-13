@@ -165,16 +165,23 @@ def run(
             homo_trusted = False
             pres = None
             if dyn_estimator is not None and pitch_model is not None:
+                # NOTE: ultralytics YOLO-pose models silently reject `augment=True`
+                # (warns once per frame and reverts to single-scale). A manual
+                # horizontal-flip TTA would mean re-ordering predicted keypoints
+                # via flip_idx — non-trivial and unlikely to help while the
+                # underlying model has 36% no-detection rate on broadcast.
+                # Revisit once the v4 model is trained.
                 pres = pitch_model.predict(
-                    enhance_pitch_lines(frame), verbose=False, imgsz=960, device=device
+                    enhance_pitch_lines(frame),
+                    verbose=False, imgsz=960, device=device,
                 )[0]
                 dyn = dyn_estimator.update(pres, image_shape=frame.shape[:2])
                 homo = dyn.homography
                 homo_trusted = not dyn.used_fallback
-                homo_status = (
-                    f"dyn ({dyn.n_visible}/32 kpts)"
-                    if homo_trusted else f"dyn-fallback ({dyn.n_visible})"
-                )
+                if homo_trusted:
+                    homo_status = f"dyn ({dyn.n_visible}vis/{dyn.n_inliers}inl)"
+                else:
+                    homo_status = f"dyn-fallback ({dyn.n_visible}: {dyn.reason or '?'})"
             else:
                 homo = static_h
                 homo_status = "static"
