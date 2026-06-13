@@ -19,13 +19,22 @@ batch: 2                   # yolo26m-pose at 960 OOMs at batch=4 on 16 GB; batch
 device: 0
 workers: 4
 
-# Explicit AdamW (mirrors training_pitch_combined.yaml after the fine-tune-collapse fix)
+# lr0=0.001 — NOT 5e-5. The fine-tune-collapse fix used 5e-5 when starting from an
+# already-trained pitch checkpoint. Here we start from COCO human-pose weights whose
+# keypoint head was re-initialised for 32 pitch keypoints; the head is random and
+# needs a real learning rate. Box head converges fine at 1e-3 because it has strong
+# pretrained priors; without 1e-3 the keypoint head barely moves (confirmed: after
+# 44 epochs at 5e-5, pose_loss 10.6→8.7, kobj_loss completely stagnant).
 optimizer: AdamW
-lr0: 0.00005
-lrf: 0.01
+lr0: 0.001
+lrf: 0.05
 momentum: 0.937
 weight_decay: 0.0005
-warmup_epochs: 3.0
+warmup_epochs: 5.0
+
+# Explicit pose/kobj loss weights (YOLO defaults, listed here so they are easy to tune).
+pose: 12.0    # gain on pose OKS loss
+kobj: 2.0     # higher than default (1.0) — encourages keypoint confidence to develop
 
 # Augmentation — addressing the "half-pitch view" failure mode.
 # Diagnostic on a broadcast clip showed the model only ever sees keypoints from
