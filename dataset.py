@@ -89,6 +89,23 @@ def cmd_soccernet_pitch(args: argparse.Namespace) -> None:
         )
 
 
+def cmd_preprocess_pitch(args: argparse.Namespace) -> None:
+    """Apply green-suppression to a combined pitch dataset → produces what
+    configs/training_pitch.yaml expects.
+    """
+    from football_tracker.datasets.preprocess_pitch_dataset import preprocess_dataset
+    src = Path(args.src)
+    if not src.exists():
+        raise SystemExit(
+            f"Source dataset YAML missing: {src}\n"
+            "Generate the combined spec first by downloading both halves:\n"
+            "  python dataset.py soccernet-pitch     # SoccerNet calibration-2023 (~13k frames)\n"
+            "  python dataset.py pitch               # Roboflow tactical (~317 frames)\n"
+            "Then ensure configs/combined_pitch.yaml lists both image roots."
+        )
+    preprocess_dataset(src, Path(args.out), args.green_factor)
+
+
 def cmd_all(args: argparse.Namespace) -> None:
     """Quick path: Roboflow players + Roboflow pitch + merge. No NDA needed."""
     api_key = args.api_key or os.environ.get("ROBOFLOW_API_KEY")
@@ -165,6 +182,17 @@ def build_parser() -> argparse.ArgumentParser:
     snp.add_argument("--out", type=Path, default=Path("data/raw/soccernet_pitch"))
     snp.add_argument("--max-samples", type=int, default=None, help="Limit for testing.")
     snp.set_defaults(func=cmd_soccernet_pitch)
+
+    pp = sub.add_parser(
+        "preprocess-pitch",
+        help="Apply green-suppression to a combined pitch dataset (produces data/processed/combined_pitch_gs/).",
+    )
+    pp.add_argument("--src", type=Path, default=Path("configs/combined_pitch.yaml"),
+                    help="Multi-source dataset YAML (SoccerNet + Roboflow paths).")
+    pp.add_argument("--out", type=Path, default=Path("data/processed/combined_pitch_gs"))
+    pp.add_argument("--green-factor", type=float, default=0.75,
+                    help="Multiplier applied to the green channel (lower = more suppression).")
+    pp.set_defaults(func=cmd_preprocess_pitch)
 
     mg = sub.add_parser("merge", help="Merge player datasets into configs/combined.yaml.")
     mg.add_argument("--soccernet", type=Path, default=None)
