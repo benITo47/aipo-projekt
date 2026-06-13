@@ -22,6 +22,7 @@ import numpy as np
 from rich.console import Console
 
 from football_tracker.analytics.distance import DistanceTracker
+from football_tracker.device import pick_device
 from football_tracker.pitch.dynamic_homography import DynamicHomographyEstimator
 from football_tracker.pitch.homography import Homography, calibrate_interactive
 from football_tracker.pitch.minimap import Minimap, _class_colour
@@ -37,6 +38,9 @@ CLASS_NAMES = {0: "player", 1: "goalkeeper", 2: "referee", 3: "ball"}
 # We re-map COCO 'person' → canonical player(0), 'sports ball' → canonical ball(3).
 _COCO_TO_CANONICAL = {0: 0, 32: 3}
 
+# Hot pink for pitch keypoint dots (BGR — OpenCV convention).
+_PITCH_KP_COLOUR = (180, 105, 255)
+
 
 def run(
     source: str,
@@ -48,9 +52,13 @@ def run(
     homography_path: Path | None = None,
     output_path: Path | None = None,
     show: bool = True,
+    device: str | None = None,
 ) -> None:
     if tracker != "bytetrack":
         raise SystemExit(f"Only bytetrack supported in v0.1 (got: {tracker})")
+
+    device = pick_device(device)
+    console.log(f"[cyan]Device[/] {device}")
 
     # ---------- detector weights ----------
     weights = Path(weights)
@@ -151,7 +159,9 @@ def run(
             homo_trusted = False
             pres = None
             if dyn_estimator is not None and pitch_model is not None:
-                pres = pitch_model.predict(enhance_pitch_lines(frame), verbose=False, imgsz=960)[0]
+                pres = pitch_model.predict(
+                    enhance_pitch_lines(frame), verbose=False, imgsz=960, device=device
+                )[0]
                 dyn = dyn_estimator.update(pres, image_shape=frame.shape[:2])
                 homo = dyn.homography
                 homo_trusted = not dyn.used_fallback
@@ -166,7 +176,7 @@ def run(
 
             # ----- detection (on unmodified frame) -----
             yres = detector.predict(
-                frame, verbose=False, imgsz=1280, classes=predict_classes
+                frame, verbose=False, imgsz=1280, classes=predict_classes, device=device
             )[0]
             tracks = bt.update(yres)
 
@@ -225,11 +235,9 @@ def run(
             # ----- pitch keypoint overlay (drawn after detection to avoid false positives) -----
             if pres is not None and pres.keypoints is not None and len(pres.keypoints.data) > 0:
                 kp_data = pres.keypoints.data.cpu().numpy()[0]
-                for kp_i, (kx, ky, kc) in enumerate(kp_data):
+                for kx, ky, kc in kp_data:
                     if kc > 0.5:
-                        cv2.circle(frame, (int(kx), int(ky)), 6, (0, 255, 255), -1)
-                        cv2.putText(frame, str(kp_i), (int(kx) + 5, int(ky) - 4),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 255), 1)
+                        cv2.circle(frame, (int(kx), int(ky)), 3, _PITCH_KP_COLOUR, -1)
 
             # ----- minimap composition -----
             if minimap is not None:

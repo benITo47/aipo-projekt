@@ -60,9 +60,10 @@ class Minimap:
 
 
 def _class_colour(class_id: int) -> tuple[int, int, int]:
+    # BGR — OpenCV convention.
     return {
-        0: (40, 220, 220),   # player    — cyan/yellow
-        1: (255, 80, 80),    # goalkeeper — bright red
-        2: (0, 0, 0),        # referee   — black
-        3: (255, 255, 255),  # ball      — white
+        0: (211,   0, 148),  # player     — violet
+        1: ( 30, 165, 255),  # goalkeeper — bright orange (high-contrast vs violet)
+        2: (  0, 255, 255),  # referee    — yellow (FIFA whistle)
+        3: (255, 255, 255),  # ball       — white
     }.get(class_id, (200, 200, 200))
