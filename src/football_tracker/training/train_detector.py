@@ -7,10 +7,14 @@ ultralytics flag works without code changes.
 from __future__ import annotations
 
 import shutil
+import time
 from pathlib import Path
 
 import yaml
 from rich.console import Console
+
+from football_tracker.reporting import dump_json, report_path
+from football_tracker.training.report_utils import build_training_summary
 
 console = Console()
 
@@ -34,7 +38,7 @@ def _check_dataset(data_yaml: Path) -> None:
             )
 
 
-def run(config_path: Path) -> Path:
+def run(config_path: Path, report_dir: Path | None = None) -> Path:
     if not config_path.exists():
         raise SystemExit(f"Training config not found: {config_path}")
     cfg = yaml.safe_load(config_path.read_text())
@@ -52,7 +56,9 @@ def run(config_path: Path) -> Path:
     model = YOLO(model_name)
 
     console.log(f"[cyan]Training detector[/] data={data_path} cfg={config_path}")
+    t0 = time.perf_counter()
     results = model.train(data=str(data_path), **cfg)
+    elapsed = time.perf_counter() - t0
 
     save_dir = Path(results.save_dir)
     best = save_dir / "weights" / "best.pt"
@@ -63,4 +69,15 @@ def run(config_path: Path) -> Path:
         console.log(f"[green]Copied best detector weights[/] → {target}")
     else:
         console.log(f"[yellow]No best.pt found in {save_dir}/weights — keeping previous checkpoint[/]")
+
+    summary = build_training_summary(
+        task="detector", save_dir=save_dir,
+        config_path=config_path, config=dict(cfg),
+        model_base=model_name, data_yaml=str(data_path),
+        elapsed_sec=elapsed, output_checkpoint=target,
+    )
+    run_name = cfg.get("name") or save_dir.name
+    rp = report_path("train", f"detector-{run_name}", root=report_dir)
+    dump_json(summary, rp)
+    console.log(f"[cyan]Training report[/] → {rp}")
     return target

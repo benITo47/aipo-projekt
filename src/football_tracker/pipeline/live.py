@@ -27,6 +27,7 @@ from football_tracker.pitch.dynamic_homography import DynamicHomographyEstimator
 from football_tracker.pitch.homography import Homography, calibrate_interactive
 from football_tracker.pitch.minimap import Minimap, _class_colour
 from football_tracker.pitch.preprocess import enhance_pitch_lines
+from football_tracker.reporting import JsonlWriter, dump_json, report_path
 from football_tracker.tracking.bytetrack import ByteTracker
 from football_tracker.tracking.trail import TrailBuffer
 
@@ -59,6 +60,8 @@ def run(
     output_path: Path | None = None,
     show: bool = True,
     device: str | None = None,
+    dump: bool = False,                 # write per-frame JSONL + summary JSON
+    report_dir: Path | None = None,
 ) -> None:
     if tracker != "bytetrack":
         raise SystemExit(f"Only bytetrack supported in v0.1 (got: {tracker})")
@@ -144,6 +147,18 @@ def run(
         out_w = width + (minimap.w if minimap else 0)
         out_h = max(height, minimap.h if minimap else 0)
         writer = cv2.VideoWriter(str(output_path), fourcc, fps, (out_w, out_h))
+
+    # ---------- per-frame dump ----------
+    dump_dir_path: Path | None = None
+    jsonl_writer: JsonlWriter | None = None
+    homo_fits = 0
+    homo_fallbacks = 0
+    if dump:
+        base = report_path("demo", Path(source).stem, root=report_dir).with_suffix("")
+        dump_dir_path = base
+        dump_dir_path.mkdir(parents=True, exist_ok=True)
+        jsonl_writer = JsonlWriter(dump_dir_path / "frames.jsonl").__enter__()
+        console.log(f"[cyan]Per-frame dump[/] → {dump_dir_path}")
 
     # ---------- main loop ----------
     frame_idx = 0
@@ -279,9 +294,39 @@ def run(
                 if cv2.waitKey(1) & 0xFF == 27:    # Esc
                     break
 
+            # ----- per-frame dump record -----
+            if jsonl_writer is not None:
+                if homo_trusted:
+                    homo_fits += 1
+                else:
+                    homo_fallbacks += 1
+                jsonl_writer.write({
+                    "frame": frame_idx,
+                    "h_status": homo_status,
+                    "h_trusted": bool(homo_trusted),
+                    "n_tracked": len(tracks),
+                    "n_untracked": len(untracked),
+                    "tracks": [
+                        {
+                            "id": int(t.track_id),
+                            "class": int(t.class_id),
+                            "conf": float(t.confidence),
+                            "bbox": t.xyxy.tolist(),
+                            "pitch_xy": (
+                                pitch_pts[i].tolist()
+                                if i < len(pitch_pts) and bool(in_pitch[i] if in_pitch.size else False)
+                                else None
+                            ),
+                        }
+                        for i, t in enumerate(tracks)
+                    ],
+                })
+
             frame_idx += 1
     finally:
         cap.release()
+        if jsonl_writer is not None:
+            jsonl_writer.__exit__(None, None, None)
         if writer is not None:
             writer.release()
         if show:
@@ -294,6 +339,32 @@ def run(
             f"  track #{tid}: distance={stats['distance_m']:.1f} m, "
             f"final speed (EMA)={stats['speed_kmh']:.1f} km/h"
         )
+
+    if dump_dir_path is not None:
+        summary = {
+            "task": "demo_run",
+            "source": str(source),
+            "weights": str(weights),
+            "pitch_weights": str(pitch_weights) if pitch_weights else None,
+            "device": device,
+            "fps": float(fps),
+            "frame_size": [width, height],
+            "frames_processed": frame_idx,
+            "homography": {
+                "fits": homo_fits,
+                "fallbacks": homo_fallbacks,
+                "fit_rate": (homo_fits / frame_idx) if frame_idx else 0.0,
+            },
+            "tracks": {
+                str(tid): {
+                    "distance_m": float(s["distance_m"]),
+                    "final_speed_kmh": float(s["speed_kmh"]),
+                }
+                for tid, s in dist.summary().items()
+            },
+        }
+        dump_json(summary, dump_dir_path / "summary.json")
+        console.log(f"[cyan]Demo summary[/] → {dump_dir_path}/summary.json")
 
 
 def _stack_side_by_side(left: np.ndarray, right: np.ndarray) -> np.ndarray:

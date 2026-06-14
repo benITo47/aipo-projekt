@@ -22,6 +22,7 @@ from football_tracker.pitch.dynamic_homography import (
 )
 from football_tracker.pitch.keypoints import load as load_scheme
 from football_tracker.pitch.preprocess import enhance_pitch_lines
+from football_tracker.reporting import dump_json, report_path
 
 console = Console()
 
@@ -33,6 +34,7 @@ def run(
     stride: int = 1,
     imgsz: int = 960,            # matches pitch model's training resolution
     device: str | None = None,
+    report_dir: Path | None = None,
 ) -> dict[str, float]:
     """Process `source` through the pitch model, matching the live pipeline's
     preprocessing (green-suppression) + imgsz so the numbers reflect what the
@@ -131,6 +133,26 @@ def run(
     _report_summary(out)
     _report_rejections(rejection_reasons, n_processed)
     _report_per_keypoint(per_kpt_seen, n_processed, scheme.names)
+
+    report = {
+        "task": "homography_eval",
+        "source": source,
+        "weights": str(pitch_weights),
+        "imgsz": imgsz,
+        "stride": stride,
+        "device": device,
+        "summary": out,
+        "rejection_reasons": dict(rejection_reasons),
+        "per_keypoint": [
+            {"index": i, "name": scheme.names[i],
+             "seen_frames": int(per_kpt_seen[i]),
+             "seen_rate": float(per_kpt_seen[i] / max(n_processed, 1))}
+            for i in range(scheme.num)
+        ],
+    }
+    rp = report_path("eval", "homography", root=report_dir)
+    dump_json(report, rp)
+    console.log(f"[cyan]Report[/] → {rp}")
     return out
 
 

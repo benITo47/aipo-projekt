@@ -44,6 +44,10 @@ def main() -> int:
                    help="Run headless (useful for batch processing).")
     p.add_argument("--device", default="auto",
                    help="auto | cpu | mps | cuda | cuda:N | 0 | 0,1,2  (default: auto)")
+    p.add_argument("--dump", action="store_true",
+                   help="Dump per-frame JSONL + summary JSON to outputs/reports/demo/.")
+    p.add_argument("--report-dir", type=Path, default=None,
+                   help="Override default report directory.")
     p.set_defaults(minimap=True, analytics=True, show=True)
 
     args = p.parse_args()
@@ -60,6 +64,8 @@ def main() -> int:
         output_path=args.output,
         show=args.show,
         device=args.device,
+        dump=args.dump,
+        report_dir=args.report_dir,
     )
     return 0
 
