@@ -11,6 +11,7 @@ import yaml
 from rich.console import Console
 
 from football_tracker.device import pick_device
+from football_tracker.reporting import dump_json, report_path
 
 console = Console()
 
@@ -28,7 +29,8 @@ def _check_dataset_present(data_yaml: Path) -> None:
 
 
 def run(
-    weights: Path, data: Path, imgsz: int = 960, device: str | None = None
+    weights: Path, data: Path, imgsz: int = 960, device: str | None = None,
+    report_dir: Path | None = None,
 ) -> dict[str, float]:
     """imgsz defaults to 960 to match the pitch model's training resolution."""
     if not weights.exists():
@@ -59,4 +61,16 @@ def run(
         console.log(f"[green]Keypoint mAP50[/]    = {out['pose_map50']:.4f}")
     console.log(f"[green]Box mAP50-95[/]       = {out['box_map50_95']:.4f}")
     console.log(f"[green]Box mAP50[/]          = {out['box_map50']:.4f}")
+
+    report = {
+        "task": "pitch_eval",
+        "weights": str(weights),
+        "data_yaml": str(data),
+        "imgsz": imgsz,
+        "device": device,
+        "metrics": out,
+    }
+    rp = report_path("eval", "pitch", root=report_dir)
+    dump_json(report, rp)
+    console.log(f"[cyan]Report[/] → {rp}")
     return out

@@ -7,6 +7,7 @@ import yaml
 from rich.console import Console
 
 from football_tracker.device import pick_device
+from football_tracker.reporting import dump_json, report_path
 
 console = Console()
 
@@ -26,7 +27,11 @@ def _check_dataset_present(data_yaml: Path) -> None:
         )
 
 
-def run(weights: Path, data: Path, imgsz: int = 1280, device: str | None = None) -> None:
+def run(
+    weights: Path, data: Path, imgsz: int = 1280, device: str | None = None,
+    report_dir: Path | None = None,
+) -> Path:
+    """Returns the path to the JSON report dumped in outputs/reports/eval/."""
     if not weights.exists():
         raise SystemExit(f"Weights not found: {weights}")
     if not data.exists():
@@ -46,3 +51,32 @@ def run(weights: Path, data: Path, imgsz: int = 1280, device: str | None = None)
     console.log(f"[green]mAP50[/]    = {metrics.box.map50:.4f}")
     console.log(f"[green]Precision[/] = {metrics.box.mp:.4f}")
     console.log(f"[green]Recall[/]    = {metrics.box.mr:.4f}")
+
+    # ---------- dump ----------
+    names = model.names if hasattr(model, "names") else {}
+    per_class = {}
+    try:
+        ap50 = metrics.box.ap50    # per-class mAP@0.5
+        for cls_idx, ap in enumerate(ap50):
+            per_class[names.get(cls_idx, str(cls_idx))] = {"mAP50": float(ap)}
+    except Exception:
+        per_class = {}
+
+    report = {
+        "task": "detector_eval",
+        "weights": str(weights),
+        "data_yaml": str(data),
+        "imgsz": imgsz,
+        "device": device,
+        "metrics": {
+            "mAP50_95": float(metrics.box.map),
+            "mAP50": float(metrics.box.map50),
+            "precision": float(metrics.box.mp),
+            "recall": float(metrics.box.mr),
+        },
+        "per_class": per_class,
+    }
+    out = report_path("eval", "detector", root=report_dir)
+    dump_json(report, out)
+    console.log(f"[cyan]Report[/] → {out}")
+    return out
