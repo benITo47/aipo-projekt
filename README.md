@@ -53,7 +53,10 @@ python eval.py all                 # → eval JSON for both models
 ### Full path — SoccerNet broadcast + Roboflow + green-suppression
 
 The pitch model lives or dies on having broadcast frames in the training mix.
-SoccerNet calibration-2023 ships ~13 k of them.
+SoccerNet calibration-2023 ships ~13 k of them; combined with Roboflow tactical
+(317 frames) and after green-suppression, the keypoint model sees
+**~13.3 k train / ~2.5 k val** images, every one with at least 4 visible
+landmarks (the geometric minimum for a homography fit).
 
 ```bash
 export ROBOFLOW_API_KEY=...
@@ -127,6 +130,10 @@ outputs/reports/
 ```
 
 Override the root with `--report-dir <path>` on any script.
+
+`eval.py pitch` defaults `--data` to the combined+green-suppressed val set
+(SoccerNet + Roboflow). Pass `--data configs/pitch.yaml` to score against the
+317-frame Roboflow-only val instead.
 
 ### Worked example — the broadcast clip we tested on
 

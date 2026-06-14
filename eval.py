@@ -93,7 +93,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     pt = sub.add_parser("pitch", help="Box + keypoint mAP for pitch model.")
     pt.add_argument("--weights", type=Path, required=True)
-    pt.add_argument("--data", type=Path, default=Path("configs/pitch.yaml"))
+    pt.add_argument(
+        "--data", type=Path,
+        default=Path("data/processed/combined_pitch_gs/data.yaml"),
+        help="Combined SoccerNet+Roboflow val set by default; pass configs/pitch.yaml for Roboflow only.",
+    )
     pt.add_argument("--imgsz", type=int, default=960)   # matches training res
     _add_common(pt)
     pt.set_defaults(func=cmd_pitch)
@@ -111,7 +115,10 @@ def build_parser() -> argparse.ArgumentParser:
     al.add_argument("--detector-weights", type=Path, default=Path("models/checkpoints/best.pt"))
     al.add_argument("--pitch-weights", type=Path, default=Path("models/checkpoints/pitch.pt"))
     al.add_argument("--detector-data", type=Path, default=Path("configs/combined.yaml"))
-    al.add_argument("--pitch-data", type=Path, default=Path("configs/pitch.yaml"))
+    al.add_argument(
+        "--pitch-data", type=Path,
+        default=Path("data/processed/combined_pitch_gs/data.yaml"),
+    )
     al.add_argument("--detector-imgsz", type=int, default=1280)
     al.add_argument("--pitch-imgsz", type=int, default=960)
     _add_common(al)
