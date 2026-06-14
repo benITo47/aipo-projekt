@@ -28,7 +28,7 @@ batch: 16                  # 16 needs ~6 GB VRAM at 960 on s-pose
 device: 0
 workers: 8
 
-# Optimizer — explicit AdamW (mirrors training_pitch_combined.yaml).
+# Optimizer — explicit AdamW; auto-MuSGD blew up cls_loss at epoch 9 in an earlier run.
 optimizer: AdamW
 lr0: 0.00005
 lrf: 0.01
@@ -46,7 +46,7 @@ scale: 0.75                # broadcast telephoto sim
 perspective: 0.001         # lower camera angle sim
 degrees: 5.0               # canted broadcast shots
 crop_fraction: 0.7         # train on random partial views (one-sided pitch frames)
-fliplr: 0.5                # uses flip_idx from configs/pitch.yaml
+fliplr: 0.5                # uses flip_idx from configs/combined_pitch.yaml
 erasing: 0.4               # random cutout (players + graphics occluding landmarks)
 auto_augment: randaugment  # colour-space jitter via standard policy
 hsv_h: 0.015
