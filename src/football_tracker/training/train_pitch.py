@@ -6,10 +6,14 @@ Mirrors `train_detector.py` but expects a pose-format dataset YAML (`kpt_shape`,
 from __future__ import annotations
 
 import shutil
+import time
 from pathlib import Path
 
 import yaml
 from rich.console import Console
+
+from football_tracker.reporting import dump_json, report_path
+from football_tracker.training.report_utils import build_training_summary
 
 console = Console()
 
@@ -18,21 +22,27 @@ def _check_dataset(data_yaml: Path) -> None:
     if not data_yaml.exists():
         raise SystemExit(
             f"Pitch dataset YAML missing: {data_yaml}\n"
-            "Run `python dataset.py pitch` first."
+            "Generate the combined + green-suppressed dataset first:\n"
+            "  python dataset.py pitch                # Roboflow tactical, ~317 frames\n"
+            "  python dataset.py soccernet-pitch …    # SoccerNet calibration-2023, ~13k frames\n"
+            "  python dataset.py preprocess-pitch     # green-suppression + merge"
         )
     body = yaml.safe_load(data_yaml.read_text())
     root = Path(body.get("path", ".")).resolve()
     for split in ("train", "val"):
         rel = body.get(split, "")
-        d = root / rel
-        if not d.exists() or not any(d.iterdir()):
-            raise SystemExit(
-                f"Pitch dataset {split} split missing or empty: {d}\n"
-                "Download the data: `python dataset.py pitch`"
-            )
+        # `train`/`val` can be a single string or a list of dirs
+        rels = [rel] if isinstance(rel, str) else (rel or [])
+        for r in rels:
+            d = root / r if not Path(r).is_absolute() else Path(r)
+            if not d.exists() or not any(d.iterdir()):
+                raise SystemExit(
+                    f"Pitch dataset {split} split missing or empty: {d}\n"
+                    "Re-run: python dataset.py preprocess-pitch"
+                )
 
 
-def run(config_path: Path) -> Path:
+def run(config_path: Path, report_dir: Path | None = None) -> Path:
     if not config_path.exists():
         raise SystemExit(f"Pitch training config not found: {config_path}")
     cfg = yaml.safe_load(config_path.read_text())
@@ -57,7 +67,9 @@ def run(config_path: Path) -> Path:
     model = YOLO(model_name)
 
     console.log(f"[cyan]Training pitch keypoint model[/] data={data_path}")
+    t0 = time.perf_counter()
     results = model.train(data=str(data_path), **cfg)
+    elapsed = time.perf_counter() - t0
 
     save_dir = Path(results.save_dir)
     best = save_dir / "weights" / "best.pt"
@@ -66,4 +78,15 @@ def run(config_path: Path) -> Path:
     if best.exists():
         shutil.copy(best, target)
         console.log(f"[green]Copied best pitch weights[/] → {target}")
+
+    summary = build_training_summary(
+        task="pitch", save_dir=save_dir,
+        config_path=config_path, config=dict(cfg),
+        model_base=model_name, data_yaml=str(data_path),
+        elapsed_sec=elapsed, output_checkpoint=target,
+    )
+    run_name = cfg.get("name") or save_dir.name
+    rp = report_path("train", f"pitch-{run_name}", root=report_dir)
+    dump_json(summary, rp)
+    console.log(f"[cyan]Training report[/] → {rp}")
     return target

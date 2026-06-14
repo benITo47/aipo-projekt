@@ -80,8 +80,8 @@ _KPT_LINE_PAIRS: list[tuple[str, str] | None] = [
     ("Small rect. right bottom", "Side line right"),
     # 22 GOALPOST_L_TOP  – foot of Goal left post right (far post)
     ("Goal left post right", None),
-    # 23 GOALPOST_L_BOT  – foot of Goal left post left  (near post, note trailing space)
-    ("Goal left post left ", None),
+    # 23 GOALPOST_L_BOT  – foot of Goal left post left  (near post)
+    ("Goal left post left", None),
     # 24 GOALPOST_R_TOP  – foot of Goal right post left (far post)
     ("Goal right post left", None),
     # 25 GOALPOST_R_BOT  – foot of Goal right post right (near post)
@@ -193,6 +193,43 @@ def _circle_midline_intersections(
 # Per-frame keypoint extraction
 # ---------------------------------------------------------------------------
 
+# Every SoccerNet class name we look up. Used both to normalise annotation
+# keys (strip whitespace, case-fold) and to warn on first frame if a release
+# silently renames a class.
+_EXPECTED_CLASSES: set[str] = {
+    "Side line top", "Side line left", "Side line right", "Side line bottom",
+    "Middle line",
+    "Big rect. left top", "Big rect. left bottom", "Big rect. left main",
+    "Big rect. right top", "Big rect. right bottom", "Big rect. right main",
+    "Small rect. left top", "Small rect. left bottom", "Small rect. left main",
+    "Small rect. right top", "Small rect. right bottom", "Small rect. right main",
+    "Goal left post right", "Goal left post left",
+    "Goal right post left", "Goal right post right",
+    "Circle central",
+}
+
+
+def _norm(s: str) -> str:
+    """Canonical form for SoccerNet class name lookup: strip + lowercase + collapse spaces."""
+    return " ".join(s.strip().lower().split())
+
+
+_EXPECTED_NORM: dict[str, str] = {_norm(c): c for c in _EXPECTED_CLASSES}
+
+
+def _normalise_ann(ann: dict) -> dict:
+    """Strip / case-fold annotation keys so lookups are robust to whitespace
+    or case drift in future SoccerNet releases (e.g. the historical
+    'Goal left post left ' trailing space)."""
+    out: dict[str, list] = {}
+    for k, v in ann.items():
+        if not isinstance(k, str):
+            continue
+        canon = _EXPECTED_NORM.get(_norm(k), k)
+        out[canon] = v
+    return out
+
+
 def _extract_keypoints(
     ann: dict,
 ) -> tuple[list[float], list[float], list[int]]:
@@ -266,9 +303,12 @@ def _write_yolo_label(
     ys: list[float],
     vis: list[int],
 ) -> bool:
-    """Write a single YOLO-pose label file. Returns False if no keypoints visible."""
+    """Write a single YOLO-pose label file. Returns False if too few keypoints visible."""
     n_vis = sum(vis)
-    if n_vis < 6:  # require at least 6 visible kpts for a useful training sample
+    # 4 is the geometric minimum to fit a homography. Keep every frame that
+    # carries a usable signal — broadcasts often only show one goal area, and
+    # the v4 augmentation (crop_fraction=0.7) trains on partial pitches anyway.
+    if n_vis < 4:
         return False
 
     # Bounding box: tight around visible keypoints
@@ -321,6 +361,7 @@ def convert(
 
     converted = 0
     skipped = 0
+    name_check_done = False
     for img_path in track(frames, description=f"[cyan]Converting {split}[/]"):
         ann_path = img_path.with_suffix(".json")
         if not ann_path.exists():
@@ -332,6 +373,17 @@ def convert(
         if not ann:
             skipped += 1
             continue
+        ann = _normalise_ann(ann)
+        if not name_check_done:
+            seen = {_norm(k) for k in ann}
+            missing = [c for c in _EXPECTED_CLASSES if _norm(c) not in seen]
+            if missing:
+                console.log(
+                    f"[yellow]SoccerNet class names not seen in first frame:[/] "
+                    f"{', '.join(missing[:6])}{'…' if len(missing) > 6 else ''} "
+                    "(may be fine if the frame just doesn't show those lines)"
+                )
+            name_check_done = True
 
         img = cv2.imread(str(img_path))
         if img is None:

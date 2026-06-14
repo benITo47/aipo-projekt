@@ -20,18 +20,18 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 def cmd_detector(args: argparse.Namespace) -> None:
     from football_tracker.training import train_detector
-    train_detector.run(config_path=args.config)
+    train_detector.run(config_path=args.config, report_dir=args.report_dir)
 
 
 def cmd_pitch(args: argparse.Namespace) -> None:
     from football_tracker.training import train_pitch
-    train_pitch.run(config_path=args.config)
+    train_pitch.run(config_path=args.config, report_dir=args.report_dir)
 
 
 def cmd_all(args: argparse.Namespace) -> None:
     from football_tracker.training import train_detector, train_pitch
-    train_detector.run(config_path=args.detector_config)
-    train_pitch.run(config_path=args.pitch_config)
+    train_detector.run(config_path=args.detector_config, report_dir=args.report_dir)
+    train_pitch.run(config_path=args.pitch_config, report_dir=args.report_dir)
 
 
 def cmd_export(args: argparse.Namespace) -> None:
@@ -51,15 +51,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     d = sub.add_parser("detector", help="Fine-tune YOLO26 player detector.")
     d.add_argument("--config", type=Path, default=Path("configs/training.yaml"))
+    d.add_argument("--report-dir", type=Path, default=None,
+                   help="Where to write the JSON report (default: outputs/reports/).")
     d.set_defaults(func=cmd_detector)
 
     pt = sub.add_parser("pitch", help="Fine-tune YOLO26-pose pitch keypoint model.")
     pt.add_argument("--config", type=Path, default=Path("configs/training_pitch.yaml"))
+    pt.add_argument("--report-dir", type=Path, default=None,
+                    help="Where to write the JSON report (default: outputs/reports/).")
     pt.set_defaults(func=cmd_pitch)
 
     al = sub.add_parser("all", help="Train detector + pitch model sequentially.")
     al.add_argument("--detector-config", type=Path, default=Path("configs/training.yaml"))
     al.add_argument("--pitch-config", type=Path, default=Path("configs/training_pitch.yaml"))
+    al.add_argument("--report-dir", type=Path, default=None)
     al.set_defaults(func=cmd_all)
 
     ex = sub.add_parser("export", help="Export a trained .pt → ONNX.")
