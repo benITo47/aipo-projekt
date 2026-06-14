@@ -1,17 +1,17 @@
 # Detector training config — consumed by `python train.py detector`.
 # Forwarded verbatim to `ultralytics.YOLO.train()`.
 #
-# v2 (post-diagnostic):
-#   - epochs 80 → 120 (patience 25 still triggers early-stop if it stalls)
+# v2 (back to small variant — quicker iteration loop):
+#   - yolo26s — small variant, ~9 GB VRAM at batch 16 / imgsz 1280
+#   - epochs 80 → 120 (patience 30 still triggers early-stop if it stalls)
 #   - explicit AdamW + lr0 5e-4 to match the pitch model's collapse-proof recipe
-#   - exist_ok: true so re-runs don't fail when the run directory exists
 
-model: yolo26m.pt          # medium variant — best speed/quality tradeoff for soccer
+model: yolo26s.pt          # small variant — keeps full-train under 90 min on RTX 3090
 data: configs/combined.yaml
 
 epochs: 120
 imgsz: 1280                # high-res helps with small/distant players
-batch: 16                  # 16 needs ~14 GB VRAM; drop to 8 if your RTX is smaller
+batch: 16                  # 16 needs ~9 GB VRAM; drop to 8 if smaller
 device: 0
 workers: 8
 
@@ -34,7 +34,7 @@ hsv_s: 0.7
 hsv_v: 0.4
 
 project: runs/detect
-name: yolo26m_v2
+name: yolo26s_v2
 patience: 30
 save_period: 10
 exist_ok: true             # let re-runs reuse the directory without crashing
