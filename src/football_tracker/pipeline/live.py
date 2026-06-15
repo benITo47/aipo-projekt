@@ -23,7 +23,9 @@ from rich.console import Console
 
 from football_tracker.analytics.distance import DistanceTracker
 from football_tracker.device import pick_device
-from football_tracker.pitch.dynamic_homography import DynamicHomographyEstimator
+from football_tracker.pitch.dynamic_homography import (
+    DynamicHomographyEstimator, STALE_THRESHOLD_FRAMES,
+)
 from football_tracker.pitch.homography import Homography, calibrate_interactive
 from football_tracker.pitch.minimap import Minimap, _class_colour
 from football_tracker.pitch.preprocess import enhance_pitch_lines
@@ -112,7 +114,7 @@ def run(
         )
 
     bt = ByteTracker(frame_rate=int(round(fps)))
-    trail = TrailBuffer(max_len=int(fps * 2))   # ~2 seconds of trail
+    trail = TrailBuffer(max_len=int(fps * 3))   # ~3 seconds of fading trail
 
     # ---------- homography (static fallback) ----------
     ok, first = cap.read()
@@ -147,6 +149,14 @@ def run(
         out_w = width + (minimap.w if minimap else 0)
         out_h = max(height, minimap.h if minimap else 0)
         writer = cv2.VideoWriter(str(output_path), fourcc, fps, (out_w, out_h))
+
+    # ---------- per-keypoint conf EMA (kills the on-screen dot flicker) ----------
+    # The pitch model's per-keypoint conf bounces frame-to-frame for boundary
+    # keypoints — a kp oscillating around the viz threshold visually flickers
+    # on/off. EMA-smooth conf so visibility transitions are gradual.
+    kp_conf_ema = np.zeros(32, dtype=np.float32)
+    KP_CONF_EMA_ALPHA = 0.4   # 0 = full smoothing, 1 = no smoothing
+    KP_VIZ_THRESHOLD = 0.4
 
     # ---------- per-frame dump ----------
     dump_dir_path: Path | None = None
@@ -193,7 +203,16 @@ def run(
                 dyn = dyn_estimator.update(pres, image_shape=frame.shape[:2])
                 homo = dyn.homography
                 homo_trusted = not dyn.used_fallback
-                if homo_trusted:
+                homo_stale = (
+                    dyn.extrapolated
+                    and dyn.frames_since_good > STALE_THRESHOLD_FRAMES
+                )
+                if homo_trusted and dyn.extrapolated:
+                    tag = "stale" if homo_stale else "extrap"
+                    homo_status = (
+                        f"dyn-{tag} {dyn.frames_since_good}f ({dyn.reason or '?'})"
+                    )
+                elif homo_trusted:
                     homo_status = f"dyn ({dyn.n_visible}vis/{dyn.n_inliers}inl)"
                 else:
                     homo_status = f"dyn-fallback ({dyn.n_visible}: {dyn.reason or '?'})"
@@ -253,8 +272,7 @@ def run(
                     foot = foot_pts[i]
                     trail.update(t.track_id, (float(foot[0]), float(foot[1])))
                     pts = trail.get(t.track_id).astype(np.int32)
-                    if len(pts) > 1:
-                        cv2.polylines(frame, [pts.reshape(-1, 1, 2)], False, colour, 2)
+                    _draw_fading_trail(frame, pts, colour)
                     on_pitch = bool(in_pitch[i]) if in_pitch.size > 0 else False
                     if show_analytics and t.class_id != 3 and on_pitch and homo_trusted:
                         total_m, speed = dist.update(t.track_id, pitch_pts[i])
@@ -271,10 +289,26 @@ def run(
             )
 
             # ----- pitch keypoint overlay (drawn after detection to avoid false positives) -----
-            if pres is not None and pres.keypoints is not None and len(pres.keypoints.data) > 0:
+            # EMA-smooth per-keypoint conf so the on-screen dots don't blink on
+            # and off when raw conf oscillates around the viz threshold. The
+            # raw position (kx, ky) we still use this frame's value — only the
+            # visibility decision is temporally smoothed.
+            have_kpts = (
+                pres is not None and pres.keypoints is not None
+                and len(pres.keypoints.data) > 0
+            )
+            if have_kpts:
                 kp_data = pres.keypoints.data.cpu().numpy()[0]
-                for kx, ky, kc in kp_data:
-                    if kc > 0.5:
+                raw_conf = kp_data[:, 2]
+            else:
+                raw_conf = np.zeros(32, dtype=np.float32)
+            kp_conf_ema = (
+                KP_CONF_EMA_ALPHA * raw_conf
+                + (1.0 - KP_CONF_EMA_ALPHA) * kp_conf_ema
+            )
+            if have_kpts:
+                for i, (kx, ky, _) in enumerate(kp_data):
+                    if kp_conf_ema[i] > KP_VIZ_THRESHOLD:
                         cv2.circle(frame, (int(kx), int(ky)), 3, _PITCH_KP_COLOUR, -1)
 
             # ----- minimap composition -----
@@ -283,6 +317,11 @@ def run(
                 mm_pts = pitch_pts[in_pitch] if in_pitch.any() else np.empty((0, 2), np.float32)
                 mm_cls = class_ids[in_pitch] if in_pitch.any() else np.empty(0, np.int32)
                 mm = minimap.render(mm_pts, mm_cls)
+                if homo_stale:
+                    # Stale tint: yellow-orange wash so the viewer knows the
+                    # geometry hasn't been refreshed in a while.
+                    tint = np.full_like(mm, (0, 165, 255))   # BGR amber
+                    mm = cv2.addWeighted(mm, 0.7, tint, 0.3, 0)
                 composed = _stack_side_by_side(frame, mm)
             else:
                 composed = frame
@@ -365,6 +404,33 @@ def run(
         }
         dump_json(summary, dump_dir_path / "summary.json")
         console.log(f"[cyan]Demo summary[/] → {dump_dir_path}/summary.json")
+
+
+def _draw_fading_trail(
+    frame: np.ndarray,
+    pts: np.ndarray,
+    colour: tuple[int, int, int],
+) -> None:
+    """Draw a comet-tail trail: newest segment full brightness + 3 px,
+    oldest segment dimmed to 25% intensity + 1 px, anti-aliased throughout.
+    """
+    n = len(pts) - 1
+    if n < 1:
+        return
+    for j in range(n):
+        # Progress in [1/n .. 1.0]: 1.0 = newest segment, small = oldest.
+        progress = (j + 1) / n
+        intensity = 0.25 + 0.75 * progress
+        faded = (
+            int(colour[0] * intensity),
+            int(colour[1] * intensity),
+            int(colour[2] * intensity),
+        )
+        thickness = max(1, int(round(1 + 2 * progress)))
+        cv2.line(
+            frame, tuple(pts[j]), tuple(pts[j + 1]),
+            faded, thickness, cv2.LINE_AA,
+        )
 
 
 def _stack_side_by_side(left: np.ndarray, right: np.ndarray) -> np.ndarray:

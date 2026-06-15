@@ -34,7 +34,11 @@ class ByteTracker:
     def __init__(
         self,
         track_activation_threshold: float = 0.25,
-        lost_track_buffer: int = 30,
+        # 90 ≈ 3.6 s at 25 fps. Lets a track survive replays, occlusions, and
+        # the camera momentarily losing focus without being re-issued a new ID.
+        # Was 30 — too short for broadcast TV where ad-board occlusion and
+        # close-ups routinely hide a player for 1-2 s.
+        lost_track_buffer: int = 90,
         minimum_matching_threshold: float = 0.8,
         frame_rate: int = 25,
         minimum_consecutive_frames: int = 1,
