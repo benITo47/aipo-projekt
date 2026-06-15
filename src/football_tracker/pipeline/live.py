@@ -190,6 +190,7 @@ def run(
             # NOTE: keypoint drawing happens AFTER detection so the drawn circles
             # are not fed back into the detector as false positives.
             homo_trusted = False
+            homo_fresh = False   # True only when this frame's H came from a per-frame fit
             pres = None
             if dyn_estimator is not None and pitch_model is not None:
                 # NOTE: ultralytics YOLO-pose models silently reject `augment=True`
@@ -205,6 +206,7 @@ def run(
                 dyn = dyn_estimator.update(pres, image_shape=frame.shape[:2])
                 homo = dyn.homography
                 homo_trusted = not dyn.used_fallback
+                homo_fresh = homo_trusted and not dyn.extrapolated
                 homo_stale = (
                     dyn.extrapolated
                     and dyn.frames_since_good > STALE_THRESHOLD_FRAMES
@@ -222,6 +224,8 @@ def run(
                 homo = static_h
                 homo_status = "static"
                 homo_trusted = homo is not None
+                # Static H never changes; every projection is by definition fresh.
+                homo_fresh = homo_trusted
 
             # ----- detection (on unmodified frame) -----
             yres = detector.predict(
@@ -277,8 +281,16 @@ def run(
                     _draw_fading_trail(frame, pts, colour)
                     on_pitch = bool(in_pitch[i]) if in_pitch.size > 0 else False
                     if show_analytics and t.class_id != 3 and on_pitch and homo_trusted:
-                        total_m, speed = dist.update(t.track_id, pitch_pts[i])
-                        label += f" | {total_m:.0f}m {speed:.1f}km/h"
+                        total_m, speed = dist.update(
+                            t.track_id, pitch_pts[i],
+                            frame_idx=frame_idx, is_fresh_fit=homo_fresh,
+                        )
+                        # speed is None until the track stabilises — render
+                        # distance only in that case rather than "0 km/h".
+                        if speed is None:
+                            label += f" | {total_m:.0f}m"
+                        else:
+                            label += f" | {total_m:.0f}m {speed:.1f}km/h"
                 cv2.putText(
                     frame, label, (x1, max(0, y1 - 6)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, colour, 2
