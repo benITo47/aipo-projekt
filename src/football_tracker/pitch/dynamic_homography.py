@@ -62,6 +62,14 @@ _ORIENTATION_PAIRS_Y = ((0, 3), (1, 2))   # (top_kpt, bot_kpt)    — px[top].y 
 # 0.6 = mostly current with a stabilising tail from the past.
 SMOOTHING_ALPHA = 0.6
 
+# A "wild fit" rejection guard: if a new candidate H jumps the image-centre
+# projection by more than this many world metres vs the smoothed H,
+# the fit is almost certainly a swap-bug or noisy correspondence set.
+# 40 m / fit-event accommodates Sky tactical cam panning (~20-30 m of
+# image-centre drift accumulates between consecutive fresh fits) while
+# still flagging the truly bad swaps that would project players 60+ m off.
+MAX_H_JUMP_M = 40.0
+
 # When a fit fails (too few kpts, cluster, RANSAC), we keep returning the
 # last good H indefinitely — until a fresh fit lands. This maximises minimap
 # uptime; on a wide-angle camera the geometry never goes stale, and on
@@ -215,6 +223,24 @@ class DynamicHomographyEstimator:
         if self._smoothed_H is None:
             blended = H_norm
         else:
+            # Wild-fit rejection: project the image centre through both the
+            # candidate H and the smoothed H; if they disagree by more than
+            # MAX_H_JUMP_M metres, this candidate is almost certainly noise
+            # (poor inlier set, partial-pitch frame, etc.). Drop it and keep
+            # extrapolating from the smoothed H.
+            if image_shape is not None:
+                h_img, w_img = image_shape
+                centre = np.array(
+                    [[[w_img / 2.0, h_img / 2.0]]], dtype=np.float32
+                )
+                old_w = cv2.perspectiveTransform(centre, self._smoothed_H)[0, 0]
+                new_w = cv2.perspectiveTransform(centre, H_norm)[0, 0]
+                jump = float(np.linalg.norm(new_w - old_w))
+                if jump > MAX_H_JUMP_M:
+                    return self._fallback(
+                        n_visible, n_inliers,
+                        f"H jump {jump:.0f}m vs smoothed",
+                    )
             blended = self._alpha * H_norm + (1 - self._alpha) * self._smoothed_H
             blended = blended / blended[2, 2]
         self._smoothed_H = blended
