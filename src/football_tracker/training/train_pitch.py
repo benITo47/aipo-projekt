@@ -42,7 +42,13 @@ def _check_dataset(data_yaml: Path) -> None:
                 )
 
 
-def run(config_path: Path, report_dir: Path | None = None) -> Path:
+def run(
+    config_path: Path,
+    report_dir: Path | None = None,
+    output_checkpoint: Path | None = None,
+) -> Path:
+    """Train the pitch model per ``config_path``. The best weights are copied
+    to ``output_checkpoint`` (default ``models/checkpoints/pitch.pt``)."""
     if not config_path.exists():
         raise SystemExit(f"Pitch training config not found: {config_path}")
     cfg = yaml.safe_load(config_path.read_text())
@@ -73,7 +79,7 @@ def run(config_path: Path, report_dir: Path | None = None) -> Path:
 
     save_dir = Path(results.save_dir)
     best = save_dir / "weights" / "best.pt"
-    target = Path("models/checkpoints/pitch.pt")
+    target = output_checkpoint or Path("models/checkpoints/pitch.pt")
     target.parent.mkdir(parents=True, exist_ok=True)
     if best.exists():
         shutil.copy(best, target)

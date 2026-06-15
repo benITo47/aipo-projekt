@@ -1,0 +1,54 @@
+# Fine-tune the existing models/checkpoints/pitch.pt on partials only.
+# Consumed by `python train_pitch_finetune.py`.
+#
+# The base model already knows how to localise the 32 pitch keypoints on
+# full-pitch frames. This run specialises it on partial-pitch views (where
+# only one half / quarter / goal area is visible) — the failure mode the
+# from-scratch model still produces.
+#
+# Outputs to models/checkpoints/pitch_finetuned.pt — does NOT overwrite
+# the base pitch.pt by default.
+
+model: models/checkpoints/pitch.pt
+data: data/processed/combined_pitch_gs_partials_only/data.yaml
+task: pose
+
+epochs: 30                 # short — just adapting, not learning from scratch
+imgsz: 960
+batch: 16
+device: 0
+workers: 8
+
+optimizer: AdamW
+lr0: 0.00005               # 20× lower than from-scratch — protect existing weights
+lrf: 0.01
+momentum: 0.937
+weight_decay: 0.0005
+warmup_epochs: 1.0
+cos_lr: true
+
+pose: 12.0
+kobj: 2.0
+
+# Minimal on-the-fly augmentation — every training sample is already a
+# partial crop with photometric jitter baked in.
+mosaic: 0.3
+close_mosaic: 8
+mixup: 0.0
+scale: 0.4
+perspective: 0.0003
+degrees: 2.0
+crop_fraction: 0.9
+fliplr: 0.5
+erasing: 0.2
+auto_augment: randaugment
+hsv_h: 0.005
+hsv_s: 0.2
+hsv_v: 0.15
+
+project: runs/pose
+name: yolo26s_pitch_partials_finetune
+patience: 10
+save_period: 5
+exist_ok: true
+plots: true

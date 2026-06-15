@@ -7,15 +7,17 @@ per-frame homography → top-down minimap + per-player distance / speed.
 
 ---
 
-## Five scripts, one repo
+## Scripts, one repo
 
-| Script        | Subcommands / flags                                                                                                | Writes |
-|---------------|--------------------------------------------------------------------------------------------------------------------|--------|
-| `dataset.py`  | `soccernet · roboflow · pitch · soccernet-pitch · preprocess-pitch · augment-pitch · youtube · merge · all`        | datasets under `data/` |
-| `train.py`    | `detector · pitch · all · export`                                                                                  | weights + `outputs/reports/train/*.json` |
-| `eval.py`     | `detector · pitch · homography · all`                                                                              | `outputs/reports/eval/*.json` |
-| `demo.py`     | live preview window (interactive)                                                                                  | annotated MP4 + (with `--dump`) `outputs/reports/demo/<slug>/…` |
-| `process.py`  | one-shot: video in → annotated MP4 out, stage logging, summary table, `--minimal` for boxes/trails only            | same dump tree as `demo.py` |
+| Script                       | Purpose / flags                                                                                                | Writes |
+|------------------------------|----------------------------------------------------------------------------------------------------------------|--------|
+| `dataset.py`                 | `soccernet · roboflow · pitch · soccernet-pitch · preprocess-pitch · augment-pitch · youtube · merge · all`     | datasets under `data/` |
+| `train.py`                   | `detector · pitch · all · export` — single-stage training                                                       | weights + `outputs/reports/train/*.json` |
+| `train_pitch_partials.py`    | From-scratch pitch training on the augmented dataset (originals + photometric + 11 partial crops per source)   | `models/checkpoints/pitch.pt` |
+| `train_pitch_finetune.py`    | Fine-tune existing `pitch.pt` on partials only                                                                 | `models/checkpoints/pitch_finetuned.pt` |
+| `eval.py`                    | `detector · pitch · homography · all`                                                                          | `outputs/reports/eval/*.json` |
+| `demo.py`                    | Interactive live preview window                                                                                | annotated MP4 + (with `--dump`) `outputs/reports/demo/<slug>/…` |
+| `process.py`                 | Batch: video in → annotated MP4 + summary table; `--minimal` for boxes/trails only                             | same dump tree as `demo.py` |
 
 Every script prints `--help` with examples and accepts `--device` (auto / cpu / mps / cuda / cuda:N / 0,1,2).
 
@@ -73,7 +75,7 @@ python train.py all                # detector + pitch (~1.5 h on RTX 3090)
 python eval.py all                 # mAP for both
 ```
 
-### Optional — offline augmentation for the pitch retrain
+### Pitch model — two-stage augmented training
 
 YOLO's on-the-fly augmentation under-samples both photometric variance **and**
 partial-pitch framing. The combined dataset's source frames all show the
@@ -81,26 +83,48 @@ whole pitch, so the model learns "centre line ≈ pixel 50 % of image" and then
 mislabels centre keypoints as left side-line keypoints when broadcast TV
 zooms into one half.
 
-`augment-pitch` writes offline copies that fix both blind spots:
+Two scripts solve this in stages.
 
 ```bash
-pip install -e '.[training]'                                  # adds albumentations
-python dataset.py augment-pitch --copies 2 --partials         # ~170 k images
-# point training_pitch.yaml at data/processed/combined_pitch_gs_aug/data.yaml
-python train.py pitch
+pip install -e '.[training]'      # adds albumentations
 ```
 
-- `--copies N` writes N photometric variants per source (HSV / gamma / blur /
-  dropout / mild affine — albumentations, keypoint-aware).
-- `--partials` writes **11 strategic crops per source** that teach the model
-  partial-pitch views directly: top / bottom / left / right halves, four
-  quarters, centre zoom, left-goal close-up, right-goal close-up. Each crop
-  is then run through the photometric pipeline too.
+#### Stage 1 — from scratch on partials + originals (`train_pitch_partials.py`)
 
-Default totals (13 k sources, `--copies 2 --partials`):
-~ 1 original + 2 photometric + 11 partials ≈ 14 × per source = **~180 k
-train images**. Drop `--partials` for the smaller ~40 k photometric-only
-variant.
+```bash
+python dataset.py augment-pitch                  # writes combined_pitch_gs_aug/
+python train_pitch_partials.py                   # ~6-12 h on RTX 3090
+```
+
+- `augment-pitch` default = original symlink + 2 photometric copies + **11
+  strategic partial-pitch crops** per source (halves / quarters / centre /
+  goal close-ups). Each partial is then photometric-augmented too.
+- ~ 14 × per source ≈ **~110 k train images** out of 13 k combined+gs
+  sources after the ≥ 4-kpt filter.
+- Output: `models/checkpoints/pitch.pt`. Trains the keypoint head from
+  scratch (re-init for 32 kpts), lr0 = 1e-3.
+
+#### Stage 2 — fine-tune that model on partials only (`train_pitch_finetune.py`)
+
+```bash
+python dataset.py augment-pitch --partials-only \
+       --out data/processed/combined_pitch_gs_partials_only
+python train_pitch_finetune.py                   # ~1-3 h on RTX 3090
+```
+
+- Partials-only dataset = just the 11 crops per source, no full-pitch
+  frames, no photometric of the full frame. **~80 k train images.**
+- Base = the stage-1 `pitch.pt`. Lr0 = 5e-5 (20× lower, protects existing
+  weights). Output: `models/checkpoints/pitch_finetuned.pt` (does NOT
+  overwrite `pitch.pt` — swap by hand if eval improves).
+
+#### Other modes
+
+```bash
+python dataset.py augment-pitch --no-partials    # photometric only (~40 k images)
+python dataset.py augment-pitch --copies 3       # heavier photometric variance
+python dataset.py augment-pitch --augment-val    # also augment val (rare)
+```
 
 Then ship back **two files**: `models/checkpoints/best.pt` and
 `models/checkpoints/pitch.pt`. Optional but useful: also the training-report

@@ -122,7 +122,8 @@ def cmd_augment_pitch(args: argparse.Namespace) -> None:
         src, Path(args.out),
         copies=args.copies, seed=args.seed,
         jpeg_quality=args.jpeg_quality, augment_val=args.augment_val,
-        partials=args.partials,
+        partials=not args.no_partials,
+        partials_only=args.partials_only,
     )
 
 
@@ -228,10 +229,11 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--jpeg-quality", type=int, default=90)
     ap.add_argument("--augment-val", action="store_true",
                     help="Also augment val. Off by default so eval mAP stays comparable.")
-    ap.add_argument("--partials", action="store_true",
-                    help=("Also write strategic partial-pitch crops per source "
-                          "(11 crops: halves, quarters, centre, goal close-ups). "
-                          "Teaches the model partial-pitch views directly."))
+    ap.add_argument("--no-partials", action="store_true",
+                    help="Skip the 11 strategic partial-pitch crops per source.")
+    ap.add_argument("--partials-only", action="store_true",
+                    help="Write ONLY the 11 partial crops — no original, no "
+                         "full-frame photometric. For the fine-tune flow.")
     ap.set_defaults(func=cmd_augment_pitch)
 
     mg = sub.add_parser("merge", help="Merge player datasets into configs/combined.yaml.")

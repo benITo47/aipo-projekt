@@ -266,17 +266,29 @@ def augment_dataset(
     seed: int = 0,
     jpeg_quality: int = 90,
     augment_val: bool = False,
-    partials: bool = False,
+    partials: bool = True,
+    partials_only: bool = False,
 ) -> Path:
-    """Read a YOLO-pose data.yaml, write each train image plus `copies`
-    photometric augmented copies into `out_dir`. With ``partials=True``,
-    each source also gets one variant per entry in :data:`PARTIAL_CROPS`
-    (top/bottom/left/right halves, four quarters, centre, two goal areas).
-    The val split is symlinked over (no augmentation) by default so eval
-    mAP stays comparable to past runs.
+    """Read a YOLO-pose data.yaml, write augmented copies into ``out_dir``.
 
-    Returns the path to the new data.yaml.
+    Modes (per train source image):
+      - default (``partials=True``):
+            1 original (symlink) + ``copies`` photometric variants + 11 partial
+            crops (each also photometric-augmented). Used for from-scratch
+            training (see ``train_pitch_partials.py``).
+      - ``partials=False``:
+            1 original + ``copies`` photometric variants only — no partial
+            crops.
+      - ``partials_only=True``:
+            Just the 11 partial crops, no original symlink, no full-frame
+            photometric copies. Used for the fine-tune target (see
+            ``train_pitch_finetune.py``).
+
+    The val split is symlinked unaugmented by default — keep eval mAP
+    comparable across runs.
     """
+    if partials_only:
+        partials = True   # implied
     random.seed(seed)
     np.random.seed(seed)
     cfg = yaml.safe_load(src_yaml.read_text())
@@ -295,14 +307,22 @@ def augment_dataset(
             out_lbls.mkdir(parents=True, exist_ok=True)
             src_lbl_dir = src_img_dir.parent / "labels"
             imgs = sorted(src_img_dir.glob("*.jpg")) + sorted(src_img_dir.glob("*.png"))
-            per_source = 1
-            if do_aug:
+            if not do_aug:
+                per_source = 1
+                mode = "(symlink only)"
+            elif partials_only:
+                per_source = len(PARTIAL_CROPS)
+                mode = f"({len(PARTIAL_CROPS)} partial crops only)"
+            else:
                 per_source = 1 + copies + (len(PARTIAL_CROPS) if partials else 0)
+                mode = f"(original + {copies} photometric"
+                if partials:
+                    mode += f" + {len(PARTIAL_CROPS)} partial crops"
+                mode += ")"
             console.log(
                 f"[cyan]{kind}{suffix}[/] {src_img_dir} — "
                 f"{len(imgs)} originals × ≤{per_source} = up to "
-                f"{len(imgs) * per_source} samples"
-                + (f"  (incl. {len(PARTIAL_CROPS)} partial crops/src)" if partials else "")
+                f"{len(imgs) * per_source} samples  {mode}"
             )
 
             aug_written = 0
@@ -310,35 +330,38 @@ def augment_dataset(
             for img_path in track(imgs, description=f"[cyan]{kind}{suffix}[/]"):
                 src_lbl = src_lbl_dir / img_path.with_suffix(".txt").name
 
-                # Symlink (fast, near-zero disk) the original image + label
-                dst_orig = out_imgs / img_path.name
-                dst_orig_lbl = out_lbls / src_lbl.name
-                if not dst_orig.exists():
-                    try:
-                        dst_orig.symlink_to(img_path.resolve())
-                    except OSError:
-                        shutil.copy2(img_path, dst_orig)
-                if src_lbl.exists() and not dst_orig_lbl.exists():
-                    try:
-                        dst_orig_lbl.symlink_to(src_lbl.resolve())
-                    except OSError:
-                        shutil.copy2(src_lbl, dst_orig_lbl)
+                # Symlink the original (skip in partials_only mode for train —
+                # the whole point is to feed the fine-tune nothing but crops).
+                if not partials_only or kind == "val":
+                    dst_orig = out_imgs / img_path.name
+                    dst_orig_lbl = out_lbls / src_lbl.name
+                    if not dst_orig.exists():
+                        try:
+                            dst_orig.symlink_to(img_path.resolve())
+                        except OSError:
+                            shutil.copy2(img_path, dst_orig)
+                    if src_lbl.exists() and not dst_orig_lbl.exists():
+                        try:
+                            dst_orig_lbl.symlink_to(src_lbl.resolve())
+                        except OSError:
+                            shutil.copy2(src_lbl, dst_orig_lbl)
 
                 if not (do_aug and src_lbl.exists()):
                     continue
 
-                # Photometric copies of the full frame
-                for j in range(copies):
-                    aug_stem = f"{img_path.stem}_aug{j}"
-                    aug_img = out_imgs / f"{aug_stem}.jpg"
-                    aug_lbl = out_lbls / f"{aug_stem}.txt"
-                    if aug_img.exists() and aug_lbl.exists():
-                        continue
-                    if _augment_one(
-                        img_path, src_lbl, aug_img, aug_lbl,
-                        pipeline, jpeg_quality,
-                    ):
-                        aug_written += 1
+                # Photometric copies of the full frame (skipped in partials_only)
+                if not partials_only:
+                    for j in range(copies):
+                        aug_stem = f"{img_path.stem}_aug{j}"
+                        aug_img = out_imgs / f"{aug_stem}.jpg"
+                        aug_lbl = out_lbls / f"{aug_stem}.txt"
+                        if aug_img.exists() and aug_lbl.exists():
+                            continue
+                        if _augment_one(
+                            img_path, src_lbl, aug_img, aug_lbl,
+                            pipeline, jpeg_quality,
+                        ):
+                            aug_written += 1
 
                 # Strategic partial-pitch crops (each then photometric-augmented)
                 if partials:
@@ -392,13 +415,16 @@ if __name__ == "__main__":
     p.add_argument("--augment-val", action="store_true",
                    help="Also augment the val split. Off by default so eval mAP "
                         "stays comparable to non-augmented runs.")
-    p.add_argument("--partials", action="store_true",
-                   help=("Also generate strategic partial-pitch crops per source "
-                         "(halves, quarters, centre, goal close-ups). Teaches the "
-                         "model to recognise partial-pitch views directly instead "
-                         "of mislabeling centre keypoints as left-edge keypoints."))
+    p.add_argument("--no-partials", action="store_true",
+                   help="Skip the 11 strategic partial-pitch crops per source.")
+    p.add_argument("--partials-only", action="store_true",
+                   help="Write ONLY the 11 partial crops per source — no original "
+                        "symlink, no full-frame photometric copies. For the "
+                        "fine-tune flow (train_pitch_finetune.py).")
     args = p.parse_args()
     augment_dataset(
         args.src, args.out, args.copies, args.seed, args.jpeg_quality,
-        args.augment_val, args.partials,
+        args.augment_val,
+        partials=not args.no_partials,
+        partials_only=args.partials_only,
     )
