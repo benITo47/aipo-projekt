@@ -106,6 +106,25 @@ def cmd_preprocess_pitch(args: argparse.Namespace) -> None:
     preprocess_dataset(src, Path(args.out), args.green_factor)
 
 
+def cmd_augment_pitch(args: argparse.Namespace) -> None:
+    """Programmatic offline augmentation — grows the pitch dataset N× with
+    photometric + mild geometric jitter. Run `python train.py pitch` after
+    pointing training_pitch.yaml at the augmented data.yaml."""
+    from football_tracker.datasets.augment_pitch_dataset import augment_dataset
+    src = Path(args.src)
+    if not src.exists():
+        raise SystemExit(
+            f"Source dataset YAML missing: {src}\n"
+            "Run `python dataset.py preprocess-pitch` first to produce the "
+            "green-suppressed combined dataset."
+        )
+    augment_dataset(
+        src, Path(args.out),
+        copies=args.copies, seed=args.seed,
+        jpeg_quality=args.jpeg_quality, augment_val=args.augment_val,
+    )
+
+
 def cmd_all(args: argparse.Namespace) -> None:
     """Quick path: Roboflow players + Roboflow pitch + merge. No NDA needed."""
     api_key = args.api_key or os.environ.get("ROBOFLOW_API_KEY")
@@ -193,6 +212,22 @@ def build_parser() -> argparse.ArgumentParser:
     pp.add_argument("--green-factor", type=float, default=0.75,
                     help="Multiplier applied to the green channel (lower = more suppression).")
     pp.set_defaults(func=cmd_preprocess_pitch)
+
+    ap = sub.add_parser(
+        "augment-pitch",
+        help="Offline augment the pitch dataset (photometric + mild geometric) N× per image.",
+    )
+    ap.add_argument("--src", type=Path,
+                    default=Path("data/processed/combined_pitch_gs/data.yaml"))
+    ap.add_argument("--out", type=Path,
+                    default=Path("data/processed/combined_pitch_gs_aug"))
+    ap.add_argument("--copies", type=int, default=2,
+                    help="Augmented copies per source image. Final size = (copies+1)×.")
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--jpeg-quality", type=int, default=90)
+    ap.add_argument("--augment-val", action="store_true",
+                    help="Also augment val. Off by default so eval mAP stays comparable.")
+    ap.set_defaults(func=cmd_augment_pitch)
 
     mg = sub.add_parser("merge", help="Merge player datasets into configs/combined.yaml.")
     mg.add_argument("--soccernet", type=Path, default=None)
