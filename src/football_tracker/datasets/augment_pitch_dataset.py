@@ -131,11 +131,71 @@ def _write_label(label_path: Path, cls: int, bbox_norm, kpts_norm, vis):
     label_path.write_text(" ".join(parts) + "\n")
 
 
+# Strategic partial-pitch crops — each entry is (name, (x_min, y_min, x_max, y_max))
+# in normalised image coords. The model otherwise mislabels centre-line keypoints
+# as left side-line keypoints when only the right half is visible (and vice
+# versa) because every training frame showed the full pitch; these crops force
+# it to learn "this is what a half / quarter / corner view actually looks like".
+PARTIAL_CROPS: list[tuple[str, tuple[float, float, float, float]]] = [
+    # Halves — overlap by 5 % so keypoints near the cut line aren't always lost.
+    ("top_half",     (0.00, 0.00, 1.00, 0.55)),
+    ("bottom_half",  (0.00, 0.45, 1.00, 1.00)),
+    ("left_half",    (0.00, 0.00, 0.55, 1.00)),
+    ("right_half",   (0.45, 0.00, 1.00, 1.00)),
+    # Quarters
+    ("top_left",     (0.00, 0.00, 0.60, 0.60)),
+    ("top_right",    (0.40, 0.00, 1.00, 0.60)),
+    ("bottom_left",  (0.00, 0.40, 0.60, 1.00)),
+    ("bottom_right", (0.40, 0.40, 1.00, 1.00)),
+    # Targeted zooms
+    ("centre",       (0.25, 0.20, 0.75, 0.80)),
+    ("left_goal",    (0.00, 0.20, 0.40, 0.80)),
+    ("right_goal",   (0.60, 0.20, 1.00, 0.80)),
+]
+
+
+def _apply_partial_crop(
+    img: np.ndarray,
+    kpts_px: list[tuple[float, float]],
+    vis: list[int],
+    crop_norm: tuple[float, float, float, float],
+) -> tuple[np.ndarray, list[tuple[float, float]], list[int]]:
+    """Crop the image to a normalised rect and translate keypoints. Keypoints
+    that fall outside the crop become invisible (vis=0)."""
+    h, w = img.shape[:2]
+    x0_n, y0_n, x1_n, y1_n = crop_norm
+    px0 = max(0, int(x0_n * w))
+    py0 = max(0, int(y0_n * h))
+    px1 = min(w, int(x1_n * w))
+    py1 = min(h, int(y1_n * h))
+    if px1 - px0 < 32 or py1 - py0 < 32:
+        return img, kpts_px, vis   # crop degenerate — fall through
+    cropped = img[py0:py1, px0:px1].copy()
+    nh, nw = cropped.shape[:2]
+    new_kpts: list[tuple[float, float]] = []
+    new_vis: list[int] = []
+    for (x, y), v in zip(kpts_px, vis):
+        if v == 0:
+            new_kpts.append((0.0, 0.0))
+            new_vis.append(0)
+            continue
+        nx = x - px0
+        ny = y - py0
+        if 0 <= nx < nw and 0 <= ny < nh:
+            new_kpts.append((nx, ny))
+            new_vis.append(v)
+        else:
+            new_kpts.append((0.0, 0.0))
+            new_vis.append(0)
+    return cropped, new_kpts, new_vis
+
+
 def _augment_one(
     img_path: Path, label_path: Path,
     out_img: Path, out_label: Path,
     pipeline,
     jpeg_quality: int,
+    crop_norm: tuple[float, float, float, float] | None = None,
 ) -> bool:
     img = cv2.imread(str(img_path))
     if img is None:
@@ -145,6 +205,13 @@ def _augment_one(
     if parsed is None:
         return False
     cls, kpts_px, vis = parsed
+
+    # Optional pre-crop to teach the model partial-pitch views directly.
+    if crop_norm is not None:
+        img, kpts_px, vis = _apply_partial_crop(img, kpts_px, vis, crop_norm)
+        # Skip if the crop already left too few visible keypoints.
+        if sum(1 for v in vis if v > 0) < MIN_VISIBLE_KPTS:
+            return False
 
     out = pipeline(image=img, keypoints=kpts_px, kpt_labels=list(range(NUM_KEYPOINTS)))
     new_img = out["image"]
@@ -199,10 +266,14 @@ def augment_dataset(
     seed: int = 0,
     jpeg_quality: int = 90,
     augment_val: bool = False,
+    partials: bool = False,
 ) -> Path:
     """Read a YOLO-pose data.yaml, write each train image plus `copies`
-    augmented copies into `out_dir`. The val split is symlinked over (no
-    augmentation) by default — keep eval comparable to past runs.
+    photometric augmented copies into `out_dir`. With ``partials=True``,
+    each source also gets one variant per entry in :data:`PARTIAL_CROPS`
+    (top/bottom/left/right halves, four quarters, centre, two goal areas).
+    The val split is symlinked over (no augmentation) by default so eval
+    mAP stays comparable to past runs.
 
     Returns the path to the new data.yaml.
     """
@@ -224,13 +295,18 @@ def augment_dataset(
             out_lbls.mkdir(parents=True, exist_ok=True)
             src_lbl_dir = src_img_dir.parent / "labels"
             imgs = sorted(src_img_dir.glob("*.jpg")) + sorted(src_img_dir.glob("*.png"))
-            multiplier = (copies + 1) if do_aug else 1
+            per_source = 1
+            if do_aug:
+                per_source = 1 + copies + (len(PARTIAL_CROPS) if partials else 0)
             console.log(
                 f"[cyan]{kind}{suffix}[/] {src_img_dir} — "
-                f"{len(imgs)} originals × {multiplier} = {len(imgs) * multiplier}"
+                f"{len(imgs)} originals × ≤{per_source} = up to "
+                f"{len(imgs) * per_source} samples"
+                + (f"  (incl. {len(PARTIAL_CROPS)} partial crops/src)" if partials else "")
             )
 
             aug_written = 0
+            partial_written = 0
             for img_path in track(imgs, description=f"[cyan]{kind}{suffix}[/]"):
                 src_lbl = src_lbl_dir / img_path.with_suffix(".txt").name
 
@@ -248,21 +324,40 @@ def augment_dataset(
                     except OSError:
                         shutil.copy2(src_lbl, dst_orig_lbl)
 
-                # Augmented copies (only when do_aug)
-                if do_aug and src_lbl.exists():
-                    for j in range(copies):
-                        aug_stem = f"{img_path.stem}_aug{j}"
-                        aug_img = out_imgs / f"{aug_stem}.jpg"
-                        aug_lbl = out_lbls / f"{aug_stem}.txt"
-                        if aug_img.exists() and aug_lbl.exists():
+                if not (do_aug and src_lbl.exists()):
+                    continue
+
+                # Photometric copies of the full frame
+                for j in range(copies):
+                    aug_stem = f"{img_path.stem}_aug{j}"
+                    aug_img = out_imgs / f"{aug_stem}.jpg"
+                    aug_lbl = out_lbls / f"{aug_stem}.txt"
+                    if aug_img.exists() and aug_lbl.exists():
+                        continue
+                    if _augment_one(
+                        img_path, src_lbl, aug_img, aug_lbl,
+                        pipeline, jpeg_quality,
+                    ):
+                        aug_written += 1
+
+                # Strategic partial-pitch crops (each then photometric-augmented)
+                if partials:
+                    for crop_name, crop_norm in PARTIAL_CROPS:
+                        pc_stem = f"{img_path.stem}_{crop_name}"
+                        pc_img = out_imgs / f"{pc_stem}.jpg"
+                        pc_lbl = out_lbls / f"{pc_stem}.txt"
+                        if pc_img.exists() and pc_lbl.exists():
                             continue
                         if _augment_one(
-                            img_path, src_lbl, aug_img, aug_lbl,
-                            pipeline, jpeg_quality,
+                            img_path, src_lbl, pc_img, pc_lbl,
+                            pipeline, jpeg_quality, crop_norm=crop_norm,
                         ):
-                            aug_written += 1
+                            partial_written += 1
             if do_aug:
-                console.log(f"  [green]→ {aug_written} augmented samples written[/]")
+                console.log(
+                    f"  [green]→ {aug_written} photometric + "
+                    f"{partial_written} partial-crop samples written[/]"
+                )
             out_image_dirs.append(str(out_imgs.resolve()))
         return out_image_dirs
 
@@ -297,7 +392,13 @@ if __name__ == "__main__":
     p.add_argument("--augment-val", action="store_true",
                    help="Also augment the val split. Off by default so eval mAP "
                         "stays comparable to non-augmented runs.")
+    p.add_argument("--partials", action="store_true",
+                   help=("Also generate strategic partial-pitch crops per source "
+                         "(halves, quarters, centre, goal close-ups). Teaches the "
+                         "model to recognise partial-pitch views directly instead "
+                         "of mislabeling centre keypoints as left-edge keypoints."))
     args = p.parse_args()
     augment_dataset(
-        args.src, args.out, args.copies, args.seed, args.jpeg_quality, args.augment_val,
+        args.src, args.out, args.copies, args.seed, args.jpeg_quality,
+        args.augment_val, args.partials,
     )

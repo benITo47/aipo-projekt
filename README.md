@@ -75,16 +75,32 @@ python eval.py all                 # mAP for both
 
 ### Optional — offline augmentation for the pitch retrain
 
-YOLO's on-the-fly augmentation under-samples photometric variance. To grow the
-pitch dataset by 3× with `albumentations` (HSV / gamma / blur / dropout / mild
-affine — keypoint-aware):
+YOLO's on-the-fly augmentation under-samples both photometric variance **and**
+partial-pitch framing. The combined dataset's source frames all show the
+whole pitch, so the model learns "centre line ≈ pixel 50 % of image" and then
+mislabels centre keypoints as left side-line keypoints when broadcast TV
+zooms into one half.
+
+`augment-pitch` writes offline copies that fix both blind spots:
 
 ```bash
-pip install -e '.[training]'                  # adds albumentations
-python dataset.py augment-pitch --copies 2    # ~40 k images
+pip install -e '.[training]'                                  # adds albumentations
+python dataset.py augment-pitch --copies 2 --partials         # ~170 k images
 # point training_pitch.yaml at data/processed/combined_pitch_gs_aug/data.yaml
 python train.py pitch
 ```
+
+- `--copies N` writes N photometric variants per source (HSV / gamma / blur /
+  dropout / mild affine — albumentations, keypoint-aware).
+- `--partials` writes **11 strategic crops per source** that teach the model
+  partial-pitch views directly: top / bottom / left / right halves, four
+  quarters, centre zoom, left-goal close-up, right-goal close-up. Each crop
+  is then run through the photometric pipeline too.
+
+Default totals (13 k sources, `--copies 2 --partials`):
+~ 1 original + 2 photometric + 11 partials ≈ 14 × per source = **~180 k
+train images**. Drop `--partials` for the smaller ~40 k photometric-only
+variant.
 
 Then ship back **two files**: `models/checkpoints/best.pt` and
 `models/checkpoints/pitch.pt`. Optional but useful: also the training-report
