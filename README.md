@@ -7,14 +7,15 @@ per-frame homography → top-down minimap + per-player distance / speed.
 
 ---
 
-## Four scripts, one repo
+## Five scripts, one repo
 
-| Script        | Subcommands                                                  | Writes |
-|---------------|--------------------------------------------------------------|--------|
-| `dataset.py`  | `soccernet · roboflow · pitch · soccernet-pitch · preprocess-pitch · youtube · merge · all` | datasets under `data/` |
-| `train.py`    | `detector · pitch · all · export`                            | weights + `outputs/reports/train/*.json` |
-| `eval.py`     | `detector · pitch · homography · all`                        | `outputs/reports/eval/*.json` |
-| `demo.py`     | (flags only)                                                 | annotated MP4 + (with `--dump`) `outputs/reports/demo/<slug>/…` |
+| Script        | Subcommands / flags                                                                                                | Writes |
+|---------------|--------------------------------------------------------------------------------------------------------------------|--------|
+| `dataset.py`  | `soccernet · roboflow · pitch · soccernet-pitch · preprocess-pitch · augment-pitch · youtube · merge · all`        | datasets under `data/` |
+| `train.py`    | `detector · pitch · all · export`                                                                                  | weights + `outputs/reports/train/*.json` |
+| `eval.py`     | `detector · pitch · homography · all`                                                                              | `outputs/reports/eval/*.json` |
+| `demo.py`     | live preview window (interactive)                                                                                  | annotated MP4 + (with `--dump`) `outputs/reports/demo/<slug>/…` |
+| `process.py`  | one-shot: video in → annotated MP4 out, stage logging, summary table, `--minimal` for boxes/trails only            | same dump tree as `demo.py` |
 
 Every script prints `--help` with examples and accepts `--device` (auto / cpu / mps / cuda / cuda:N / 0,1,2).
 
@@ -72,6 +73,19 @@ python train.py all                # detector + pitch (~1.5 h on RTX 3090)
 python eval.py all                 # mAP for both
 ```
 
+### Optional — offline augmentation for the pitch retrain
+
+YOLO's on-the-fly augmentation under-samples photometric variance. To grow the
+pitch dataset by 3× with `albumentations` (HSV / gamma / blur / dropout / mild
+affine — keypoint-aware):
+
+```bash
+pip install -e '.[training]'                  # adds albumentations
+python dataset.py augment-pitch --copies 2    # ~40 k images
+# point training_pitch.yaml at data/processed/combined_pitch_gs_aug/data.yaml
+python train.py pitch
+```
+
 Then ship back **two files**: `models/checkpoints/best.pt` and
 `models/checkpoints/pitch.pt`. Optional but useful: also the training-report
 JSONs from `outputs/reports/train/` — they have per-epoch loss curves + best-epoch
@@ -84,11 +98,16 @@ metrics, helpful for the course report.
 ```bash
 make install-mac
 # drop best.pt + pitch.pt into models/checkpoints/
+
+# Live preview (interactive, Esc to quit):
 python demo.py --source clip.mp4               # or --source 0 for webcam
+
+# Batch / headless: video in → annotated MP4 + JSON summary:
+python process.py clip.mov                     # → clip_processed.mp4
 ```
 
-Auto-picks MPS on Apple Silicon (~14 fps end-to-end). Override with
-`--device cpu` or `--device cuda` on a box with both.
+Auto-picks MPS on Apple Silicon (~20 fps end-to-end on a 60 s 720p clip).
+Override with `--device cpu` or `--device cuda`.
 
 With `pitch.pt` the homography is recomputed every frame and EMA-smoothed across
 successive fits — the HUD shows `H: dyn (12vis/8inl)` when a fit lands, or the
@@ -97,14 +116,25 @@ specific rejection reason on fallback (`dyn-fallback (3: keypoints cluster (16×
 Without `pitch.pt`: first frame prompts you to click the four pitch corners
 (TL → TR → BR → BL); the matrix is saved to `configs/homography.json` and reused.
 
-### Useful demo flags
+### Useful flags
 
 ```bash
-python demo.py --source clip.mp4 --output annotated.mp4 --no-show     # headless render
-python demo.py --source clip.mp4 --dump                                # per-frame JSONL + summary JSON
-python demo.py --source clip.mp4 --no-pitch                            # force static click-homography
-python demo.py --source clip.mp4 --weights /dev/null --no-pitch        # stock yolo26n COCO fallback (no fine-tuning needed)
+# demo.py — interactive
+python demo.py --source clip.mp4 --output annotated.mp4 --no-show       # headless render
+python demo.py --source clip.mp4 --dump                                 # per-frame JSONL + summary JSON
+python demo.py --source clip.mp4 --no-pitch                             # force static click-homography
+python demo.py --source clip.mp4 --weights /dev/null --no-pitch         # stock yolo26n COCO fallback
+
+# process.py — batch, with stage timing + summary table
+python process.py clip.mov                                              # default: full overlays
+python process.py clip.mp4 --minimal                                    # boxes + IDs + trails only
+python process.py clip.mp4 --no-minimap --no-analytics                  # keep keypoint dots + HUD, drop minimap + km/h
+python process.py clip.mp4 -o annotated.mp4 --device cuda
 ```
+
+`process.py` accepts any container FFmpeg can decode (mp4, mov, mkv, avi, webm,
+m4v, ts, flv, wmv, mpg). 720p source → MPS render at ~20 fps, real-time factor
+~0.8×.
 
 ---
 
@@ -152,6 +182,43 @@ on a given clip.
 
 ---
 
+## Pipeline guards (why the minimap doesn't lie)
+
+The live pipeline isn't just "predict keypoints → solve homography → project
+players". Several guards stop the obvious failure modes from polluting the
+output.
+
+**Homography validation** (`src/football_tracker/pitch/dynamic_homography.py`):
+
+- Kp conf gate (≥ 0.4) — kills the model's tendency to hallucinate off-screen
+  keypoints when the pitch isn't fully framed.
+- Minimum 6 visible keypoints + 5 RANSAC inliers — RANSAC has a real outlier
+  budget rather than fitting from 4 noisy correspondences.
+- World-span and image-span checks — reject H's fitted from a cluster of
+  keypoints that span < 15 % of the pitch (or < 15 % of the image).
+- **Orientation sanity** — when TL/TR (or BL/BR) are both above conf, their
+  pixel ordering must match the world ordering. Catches the swap-bug that
+  mirrors the minimap on partial-pitch frames.
+- **Wild-fit rejection** — a candidate H that projects the image centre more
+  than 40 m away from the smoothed H's projection is dropped as outlier.
+- **Unlimited extrapolation with stale tint** — the last good H is held
+  indefinitely; past 12 s without a fresh fit the minimap is tinted amber
+  so the viewer knows it's stale.
+
+**Speed math** (`src/football_tracker/analytics/distance.py`) is gated to
+**fresh-fit frames only**. Camera pans during extrapolation would otherwise
+project a stationary player as moving with the camera. Per-sample delta is
+divided by `dt_frames / fps` so gaps between fresh fits are measured correctly;
+sliding-window median rejects spikes; constant noise floor (5 cm) pins truly
+stationary players to 0 km/h; hard cap at 40 km/h.
+
+**Tracking** uses `supervision.ByteTrack` with `lost_track_buffer = 90` so an
+ID survives ~3.6 s of occlusion (replays, ad-board cuts, close-ups). Trails
+fade comet-tail style — newest segment full brightness + 3 px, oldest 25 %
+intensity + 1 px, anti-aliased throughout.
+
+---
+
 ## All make targets
 
 ```
@@ -188,10 +255,11 @@ make smoke            Run scripts/smoke_test.py
 
 ```
 .
-├── dataset.py          ← single entry: data download + preprocess + merge
-├── train.py            ← single entry: train both models, dumps train JSON
-├── eval.py             ← single entry: detector / pitch / homography eval, dumps JSON
-├── demo.py             ← single entry: combined live pipeline, optional --dump JSON
+├── dataset.py          ← data download + preprocess + augment + merge
+├── train.py            ← train both models, dumps train JSON
+├── eval.py             ← detector / pitch / homography eval, dumps JSON
+├── demo.py             ← interactive live preview (cv2 window)
+├── process.py          ← batch: video in → annotated MP4 out + summary table
 ├── Makefile            ← all flows as `make <target>`
 ├── configs/
 │   ├── classes.yaml             # player class scheme
@@ -202,14 +270,17 @@ make smoke            Run scripts/smoke_test.py
 │   ├── pitch.yaml               # Roboflow-only pitch YAML (generated by `pitch`)
 │   ├── combined_pitch.yaml      # SoccerNet + Roboflow source spec for preprocess-pitch
 │   └── homography.json          # generated by click-calibrate fallback
+├── samples/clips/      # 5 × 2-min Liverpool–PSG tactical-cam fragments (1080p, git-tracked)
 ├── outputs/
-│   └── reports/                 # JSON dumps from every run
+│   └── reports/                 # JSON dumps from every run (gitignored)
 ├── src/football_tracker/
-│   ├── datasets/       # SoccerNet, Roboflow (players + pitch), YouTube, merge, preprocess
+│   ├── datasets/       # SoccerNet, Roboflow (players + pitch), YouTube, merge,
+│   │                   # preprocess (green-suppression), augment_pitch_dataset
 │   ├── training/       # detector / pitch trainers, eval, ONNX export, report_utils
-│   ├── tracking/       # ByteTrack wrapper (returns tracked + untracked)
-│   ├── pitch/          # keypoint scheme, dynamic homography (with EMA), minimap, preprocess
-│   ├── analytics/      # distance / speed / heatmap accumulators
+│   ├── tracking/       # ByteTrack wrapper (lost_buffer=90, returns tracked + untracked)
+│   ├── pitch/          # keypoint scheme, dynamic homography (orientation + jump guards
+│   │                   # + EMA + unlimited extrap), minimap, preprocess
+│   ├── analytics/      # distance / speed (fresh-fit gated, median window) + heatmap
 │   ├── pipeline/live.py   # detect → track → project → analyse → render (+ dump)
 │   ├── reporting.py    # dump_json / timestamp_slug / JsonlWriter
 │   └── device.py       # pick_device() — CUDA > MPS > CPU
@@ -226,10 +297,16 @@ Required:
 - Mapping bounding boxes onto a top-down pitch schematic.
 
 Implemented:
-- Distance covered + speed per player.
-- Per-frame homography from learned pitch keypoints (RANSAC + EMA smoothing).
+- Distance covered + speed per player — fresh-fit gated, median-windowed,
+  realistic 40 km/h ceiling.
+- Per-frame homography from learned pitch keypoints (RANSAC + EMA smoothing,
+  orientation + jump guards, unlimited extrapolation with stale tint).
 - Structured JSON dumps of every run for offline analysis.
 - Pre-flight dataset checks and clear errors in train / eval scripts.
+- One-shot batch CLI (`process.py`) with stage timing + summary table +
+  `--minimal` flag.
+- Offline augmentation pipeline (`dataset.py augment-pitch`) for the
+  keypoint retrain.
 
 Stretch:
 - Heatmaps per player / team (module ready; not yet wired to live HUD).
