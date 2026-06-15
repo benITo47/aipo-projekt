@@ -58,6 +58,8 @@ def run(
     tracker: str = "bytetrack",
     show_minimap: bool = True,
     show_analytics: bool = True,
+    show_keypoints: bool = True,        # hot-pink pitch keypoint dots
+    show_hud: bool = True,              # top-left "H: dyn …  det: …" text
     homography_path: Path | None = None,
     output_path: Path | None = None,
     show: bool = True,
@@ -283,10 +285,11 @@ def run(
                 )
 
             # HUD: homography status + detection stats (top-left)
-            cv2.putText(
-                frame, f"H: {homo_status}  det: {len(tracks)}+{len(untracked)} untracked",
-                (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2
-            )
+            if show_hud:
+                cv2.putText(
+                    frame, f"H: {homo_status}  det: {len(tracks)}+{len(untracked)} untracked",
+                    (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2
+                )
 
             # ----- pitch keypoint overlay (drawn after detection to avoid false positives) -----
             # EMA-smooth per-keypoint conf so the on-screen dots don't blink on
@@ -306,7 +309,7 @@ def run(
                 KP_CONF_EMA_ALPHA * raw_conf
                 + (1.0 - KP_CONF_EMA_ALPHA) * kp_conf_ema
             )
-            if have_kpts:
+            if have_kpts and show_keypoints:
                 for i, (kx, ky, _) in enumerate(kp_data):
                     if kp_conf_ema[i] > KP_VIZ_THRESHOLD:
                         cv2.circle(frame, (int(kx), int(ky)), 3, _PITCH_KP_COLOUR, -1)

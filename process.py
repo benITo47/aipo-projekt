@@ -140,8 +140,21 @@ def main() -> int:
     p.add_argument("--no-minimap", action="store_true",
                    help="Skip the top-down minimap panel.")
     p.add_argument("--no-analytics", action="store_true",
-                   help="Skip per-player distance / speed overlay.")
+                   help="Skip per-player distance / speed labels.")
+    p.add_argument("--no-keypoints", action="store_true",
+                   help="Skip the hot-pink pitch keypoint dots.")
+    p.add_argument("--no-hud", action="store_true",
+                   help="Skip the top-left H-status / detection-count HUD text.")
+    p.add_argument("--minimal", action="store_true",
+                   help="Strip every overlay except player boxes, IDs, and "
+                        "fading trails. Implies --no-minimap --no-analytics "
+                        "--no-keypoints --no-hud.")
     args = p.parse_args()
+    if args.minimal:
+        args.no_minimap = True
+        args.no_analytics = True
+        args.no_keypoints = True
+        args.no_hud = True
 
     inp = args.input.resolve()
     if not inp.exists():
@@ -202,6 +215,8 @@ def main() -> int:
             tracker="bytetrack",
             show_minimap=not args.no_minimap,
             show_analytics=not args.no_analytics,
+            show_keypoints=not args.no_keypoints,
+            show_hud=not args.no_hud,
             output_path=out,
             show=False,
             device=args.device,
