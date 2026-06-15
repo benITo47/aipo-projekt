@@ -20,12 +20,15 @@ def _check_dataset_present(data_yaml: Path) -> None:
     body = yaml.safe_load(data_yaml.read_text())
     root = Path(body.get("path", ".")).resolve()
     val_rel = body.get("val", "")
-    val_dir = root / val_rel
-    if not val_dir.exists() or not any(val_dir.iterdir()):
-        raise SystemExit(
-            f"Pitch dataset val split is missing or empty: {val_dir}\n"
-            "Download it first: python dataset.py pitch"
-        )
+    # val can be a string or a list of dirs (combined datasets use a list)
+    rels = [val_rel] if isinstance(val_rel, str) else (val_rel or [])
+    for rel in rels:
+        val_dir = Path(rel) if Path(rel).is_absolute() else root / rel
+        if not val_dir.exists() or not any(val_dir.iterdir()):
+            raise SystemExit(
+                f"Pitch dataset val split is missing or empty: {val_dir}\n"
+                "Download it first: python dataset.py pitch"
+            )
 
 
 def run(
