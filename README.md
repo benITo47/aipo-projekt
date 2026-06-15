@@ -5,6 +5,10 @@ Player detection, tracking, and tactical analytics for football match footage.
 `YOLO26` detector → `ByteTrack` tracker → `YOLO26-pose` pitch keypoints →
 per-frame homography → top-down minimap + per-player distance / speed.
 
+> **Training on the RTX box?** Follow [`RETRAIN.md`](RETRAIN.md) — it's the
+> step-by-step playbook for the two-stage pitch retrain, including
+> sanity-check commands at every step and the failure-mode cheatsheet.
+
 ---
 
 ## Scripts, one repo
@@ -345,8 +349,9 @@ Implemented:
 - Pre-flight dataset checks and clear errors in train / eval scripts.
 - One-shot batch CLI (`process.py`) with stage timing + summary table +
   `--minimal` flag.
-- Offline augmentation pipeline (`dataset.py augment-pitch`) for the
-  keypoint retrain.
+- Offline augmentation pipeline (`dataset.py augment-pitch`) with partial-
+  pitch crops, and a two-stage training flow (`train_pitch_partials.py`
+  followed by `train_pitch_finetune.py`).
 
 Stretch:
 - Heatmaps per player / team (module ready; not yet wired to live HUD).
