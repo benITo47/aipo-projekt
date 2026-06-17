@@ -391,7 +391,7 @@ Wynik                   & best.pt           & pitch.pt \\
 \end{center}
 
 Wartość \texttt{lr0=0,001} dla modelu boiska jest celowo wysoka -- głowica
-punktów uczona jest praktycznie od zera, a niższy współczynnik powodował, że
+punktów uczona jest praktycznie od zera, a niższy współczynnik powodował, że model utykał w lokalnym optimum.
 
 \subsection{Dwuetapowe trenowanie modelu boiska}
 
@@ -770,7 +770,7 @@ Dodatkowo system wylicza dystans i prędkość zawodników oraz zapisuje
 ustrukturyzowane raporty z każdego uruchomienia.
 
 Przeprowadzone testy potwierdziły, że potok działa: na 20-sekundowym fragmencie
-homografia była zaufana w 100\% klatek (82\% świeżych dopasowań), wykryto
+homografia była wiarygodna w 100\% klatek (82\% świeżych dopasowań), wykryto
 39~unikalnych identyfikatorów zawodników, a wartości dystansu i prędkości były
 realistyczne. Najmocniejszą stroną systemu jest detekcja i śledzenie
 zawodników oraz bramkarzy wraz z poprawnym odwzorowaniem ich pozycji na boisku.
